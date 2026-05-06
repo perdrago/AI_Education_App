@@ -1,7 +1,7 @@
 import re
 from PyQt5.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
-    QScrollArea, QWidget, QSizePolicy, QSpacerItem
+    QScrollArea, QWidget, QSizePolicy, QSpacerItem, QPushButton
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QSize
 from PyQt5.QtGui import QFont, QPalette, QColor, QDragEnterEvent, QDropEvent
@@ -25,18 +25,22 @@ class BlankTextBox(QLineEdit):
         _fs = 7 if is_small else 10
         self.setFont(QFont("Consolas", _fs))
         
-        # Style
+        # Style - Changed to gray with gradient
         self.setStyleSheet(f"""
             QLineEdit {{
-                border: 2px dashed #f59e0b;
-                border-radius: 6px;
+                border: 2px dashed #94a3b8;
+                border-radius: 8px;
                 padding: {4 if is_small else 8}px;
-                background-color: rgba(245, 158, 11, 0.05);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(248, 250, 252, 1),
+                    stop:1 rgba(241, 245, 249, 1));
                 color: #1e293b;
             }}
             QLineEdit:focus {{
-                border: 2px solid #3b82f6;
-                background-color: #ffffff;
+                border: 2px solid #64748b;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #ffffff,
+                    stop:1 #f8fafc);
             }}
         """)
         
@@ -76,10 +80,12 @@ class BlankTextBox(QLineEdit):
         if is_correct:
             self.setStyleSheet(f"""
                 QLineEdit {{
-                    border: 2px solid #22c55e;
-                    border-radius: 6px;
+                    border: 3px solid #22c55e;
+                    border-radius: 8px;
                     padding: {_pad}px;
-                    background-color: rgba(34, 197, 94, 0.1);
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(220, 252, 231, 1),
+                        stop:1 rgba(187, 247, 208, 1));
                     color: #166534;
                     font-weight: bold;
                 }}
@@ -87,10 +93,12 @@ class BlankTextBox(QLineEdit):
         else:
             self.setStyleSheet(f"""
                 QLineEdit {{
-                    border: 2px solid #ef4444;
-                    border-radius: 6px;
+                    border: 3px solid #ef4444;
+                    border-radius: 8px;
                     padding: {_pad}px;
-                    background-color: rgba(239, 68, 68, 0.1);
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(254, 226, 226, 1),
+                        stop:1 rgba(254, 202, 202, 1));
                     color: #991b1b;
                 }}
             """)
@@ -99,15 +107,19 @@ class BlankTextBox(QLineEdit):
         _pad = 5 if self._is_small else 8
         self.setStyleSheet(f"""
             QLineEdit {{
-                border: 2px dashed #f59e0b;
-                border-radius: 6px;
+                border: 2px dashed #94a3b8;
+                border-radius: 8px;
                 padding: {_pad}px;
-                background-color: rgba(245, 158, 11, 0.05);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(248, 250, 252, 1),
+                    stop:1 rgba(241, 245, 249, 1));
                 color: #1e293b;
             }}
             QLineEdit:focus {{
-                border: 2px solid #3b82f6;
-                background-color: #ffffff;
+                border: 2px solid #64748b;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #ffffff,
+                    stop:1 #f8fafc);
             }}
         """)
 
@@ -120,9 +132,17 @@ class GameLessonWidget(QFrame):
         self._blank_boxes = {}  # line_num -> BlankTextBox
         self._parsed_step = None
         self._is_small = False
+        self._instruction_labels = {}  # Store instruction labels for toggle
         
         self.setObjectName("gameLessonWidget")
-        self.setStyleSheet("background-color: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0;")
+        self.setStyleSheet("""
+            QFrame#gameLessonWidget {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #ffffff, stop:1 #f8fafc);
+                border-radius: 16px;
+                border: 2px solid #e2e8f0;
+            }
+        """)
         
         self._main_layout = QVBoxLayout(self)
         self._main_layout.setContentsMargins(0, 0, 0, 0)
@@ -157,6 +177,7 @@ class GameLessonWidget(QFrame):
     def set_blank_mode(self, parsed_step):
         self._parsed_step = parsed_step
         self._blank_boxes.clear()
+        self._instruction_labels.clear()
         
         while self._content_layout.count():
             item = self._content_layout.takeAt(0)
@@ -167,6 +188,7 @@ class GameLessonWidget(QFrame):
         blank_map = parsed_step.blank_map
         
         current_code_block = []
+        pending_instruction = None  # Store instruction to add with next blank
         
         skip_patterns = [
             r"^#\s*={3,}",
@@ -180,6 +202,10 @@ class GameLessonWidget(QFrame):
         
         def should_skip(l):
             return any(re.search(pat, l, re.I) for pat in skip_patterns)
+        
+        def is_instruction_line(l):
+            """Check if line is an instruction (starts with # ✏️)"""
+            return l.strip().startswith("# ✏️")
 
         for line_num, line in enumerate(lines):
             if line_num in blank_map:
@@ -188,11 +214,19 @@ class GameLessonWidget(QFrame):
                     current_code_block = []
                     
                 blank_info = blank_map[line_num]
-                self._add_blank_block(line_num, blank_info)
+                self._add_blank_block(line_num, blank_info, pending_instruction)
+                pending_instruction = None  # Reset after adding
             else:
                 stripped = line.strip()
                 if should_skip(line):
                     continue
+                
+                # Check if this is an instruction line
+                if is_instruction_line(line):
+                    # Extract instruction text (remove # ✏️ prefix)
+                    instruction_text = stripped.replace("# ✏️", "").strip()
+                    pending_instruction = instruction_text
+                    continue  # Don't add to code block
                 
                 if stripped.startswith("#"):
                     if current_code_block:
@@ -221,11 +255,13 @@ class GameLessonWidget(QFrame):
         label.setFont(QFont("Inter", _fs, QFont.Bold))
         label.setStyleSheet(f"""
             QLabel {{
-                color: #4f46e5;
-                background-color: #eef2ff;
-                border-left: 4px solid #4f46e5;
+                color: #1e3a8a;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #dbeafe, stop:1 #bfdbfe);
+                border-left: 5px solid #3b82f6;
                 padding: {5 if self._is_small else 10}px {8 if self._is_small else 15}px;
-                border-radius: 4px;
+                border-radius: 8px;
+                border: 2px solid #93c5fd;
             }}
         """)
         self._content_layout.addWidget(label)
@@ -236,16 +272,24 @@ class GameLessonWidget(QFrame):
         label.setFont(QFont("Consolas", _fs))
         label.setStyleSheet(f"""
             QLabel {{
-                color: #0f172a;
-                background-color: #f1f5f9;
-                border: 1px solid #e2e8f0;
+                color: #1e293b;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #f8fafc, stop:1 #f1f5f9);
+                border: 2px solid #cbd5e1;
                 padding: {4 if self._is_small else 10}px;
-                border-radius: 6px;
+                border-radius: 8px;
             }}
         """)
         self._content_layout.addWidget(label)
 
-    def _add_blank_block(self, line_num, blank_info):
+    def _add_blank_block(self, line_num, blank_info, instruction_text=None):
+        # Container for blank + instruction
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(4)
+        
+        # Blank input row
         h_layout = QHBoxLayout()
         h_layout.setContentsMargins(0, 0, 0, 0)
         
@@ -259,9 +303,145 @@ class GameLessonWidget(QFrame):
         
         h_layout.addWidget(textbox)
         
-        blank_widget = QWidget()
-        blank_widget.setLayout(h_layout)
-        self._content_layout.addWidget(blank_widget)
+        # Add toggle button if there's an instruction
+        if instruction_text:
+            # Get color for this instruction based on function name
+            bg_color, text_color = self._get_instruction_colors(instruction_text)
+            
+            # Toggle button - gradient gray/purple
+            toggle_btn = QPushButton("▼")
+            toggle_btn.setFixedSize(24 if self._is_small else 32, 24 if self._is_small else 32)
+            toggle_btn.setCursor(Qt.PointingHandCursor)
+            toggle_btn.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 #94a3b8, stop:1 #64748b);
+                    color: white;
+                    border: 2px solid rgba(255, 255, 255, 0.3);
+                    border-radius: 6px;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 #64748b, stop:1 #475569);
+                    border: 2px solid rgba(255, 255, 255, 0.5);
+                }
+            """)
+            h_layout.addWidget(toggle_btn)
+            
+            # Create instruction label (hidden by default) with category colors
+            instruction_label = QLabel(f"✏️ {instruction_text}")
+            instruction_label.setWordWrap(True)
+            _fs = 7 if self._is_small else 9
+            instruction_label.setFont(QFont("Inter", _fs))
+            instruction_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {text_color};
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                        stop:0 {bg_color},
+                        stop:1 rgba(255, 255, 255, 0.8));
+                    border-left: 4px solid {text_color};
+                    border: 2px solid {text_color};
+                    padding: {4 if self._is_small else 8}px;
+                    border-radius: 8px;
+                    margin-left: {pixel_indent if indent_spaces > 0 else 0}px;
+                }}
+            """)
+            instruction_label.setVisible(False)  # Hidden by default
+            
+            # Store reference
+            self._instruction_labels[line_num] = {
+                'label': instruction_label,
+                'button': toggle_btn,
+                'visible': False
+            }
+            
+            # Connect toggle
+            toggle_btn.clicked.connect(lambda checked, ln=line_num: self._toggle_instruction(ln))
+            
+            # Add to container
+            blank_widget = QWidget()
+            blank_widget.setLayout(h_layout)
+            container_layout.addWidget(blank_widget)
+            container_layout.addWidget(instruction_label)
+        else:
+            blank_widget = QWidget()
+            blank_widget.setLayout(h_layout)
+            container_layout.addWidget(blank_widget)
+        
+        self._content_layout.addWidget(container)
+    
+    def _get_instruction_colors(self, instruction_text):
+        """Extract function name from instruction and return matching category colors.
+        Returns (background_color, text_color) tuple."""
+        
+        # Default colors (orange - for unknown functions)
+        default_bg = "rgba(254, 243, 199, 1)"  # Light yellow/orange
+        default_text = "#f97316"  # Orange
+        
+        # Extract function name from instruction text
+        # Pattern: USE 'FUNCTION_NAME()' or USE `FUNCTION_NAME()` or USE "FUNCTION_NAME()"
+        import re
+        match = re.search(r"['\"`]([A-Za-z_]+)\(", instruction_text, re.IGNORECASE)
+        if not match:
+            return (default_bg, default_text)
+        
+        func_name = match.group(1)
+        
+        # Map function names to categories and their colors
+        # Camera functions - Orange #f97316
+        camera_funcs = ["Init_Camera", "Get_Camera_Frame", "Close_Camera", "Save_Frame", 
+                       "Load_Image", "Set_Camera_Resolution", "Capture_Snapshot"]
+        
+        # Image Processing functions - Green #10b981
+        image_funcs = ["convert_to_gray", "resize_image", "apply_blur", "detect_edges",
+                      "flip_image", "adjust_brightness", "rotate_image", "crop_image",
+                      "draw_text", "convert_to_hsv", "threshold_image", "blend_images",
+                      "split_channels", "equalize_histogram", "detect_contours"]
+        
+        # AI Vision functions - Purple #8b5cf6
+        ai_funcs = ["Load_YuNet_Model", "Run_YuNet_Model", "Load_ONNX_Model", "Run_ONNX_Model",
+                   "Detect_Faces", "Draw_Detections", "Draw_Detections_MultiClass",
+                   "Draw_Engine_Detections"]
+        
+        # Display & Dashboard functions - Indigo #6366f1
+        display_funcs = ["Show_Image", "Show_Multiple_Images", "Close_All_Windows",
+                        "Update_Dashboard", "Show_FPS", "Observe_Variable"]
+        
+        # Drawing functions - Pink #ec4899
+        drawing_funcs = ["Draw_Rectangle", "Draw_Circle", "Draw_Line", "Draw_Polygon",
+                        "Draw_Text_On_Image"]
+        
+        # Determine category and return colors (case-insensitive comparison)
+        func_name_lower = func_name.lower()
+        
+        if any(f.lower() == func_name_lower for f in camera_funcs):
+            # Camera - Orange
+            return ("rgba(254, 243, 199, 1)", "#f97316")
+        elif any(f.lower() == func_name_lower for f in image_funcs):
+            # Image Processing - Green/Mint
+            return ("rgba(209, 250, 229, 1)", "#10b981")
+        elif any(f.lower() == func_name_lower for f in ai_funcs):
+            # AI Vision - Purple/Violet
+            return ("rgba(237, 233, 254, 1)", "#8b5cf6")
+        elif any(f.lower() == func_name_lower for f in display_funcs):
+            # Display & Dashboard - Indigo
+            return ("rgba(224, 231, 255, 1)", "#6366f1")
+        elif any(f.lower() == func_name_lower for f in drawing_funcs):
+            # Drawing - Pink
+            return ("rgba(252, 231, 243, 1)", "#ec4899")
+        else:
+            return (default_bg, default_text)
+    
+    def _toggle_instruction(self, line_num):
+        """Toggle visibility of instruction for a specific blank."""
+        if line_num in self._instruction_labels:
+            info = self._instruction_labels[line_num]
+            info['visible'] = not info['visible']
+            info['label'].setVisible(info['visible'])
+            # Update button icon
+            info['button'].setText("▲" if info['visible'] else "▼")
 
     def get_blank_contents(self):
         contents = {}
