@@ -154,6 +154,41 @@
          <layout class="QHBoxLayout" name="togglesRow">
           <property name="spacing"><number>12</number></property>
           
+          <!-- Tutorials Button -->
+          <item>
+           <widget class="QPushButton" name="btnTutorials">
+            <property name="text"><string>📚 Tutorials</string></property>
+            <property name="minimumSize"><size><width>120</width><height>36</height></size></property>
+            <property name="cursor"><cursorShape>PointingHandCursor</cursorShape></property>
+            <property name="styleSheet">
+             <string notr="true">
+              QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                  stop:0 rgba(139, 92, 246, 0.9),
+                  stop:1 rgba(109, 40, 217, 0.9));
+                color: white;
+                border-radius: 18px;
+                font-weight: bold;
+                font-size: 14px;
+                border: 2px solid rgba(255, 255, 255, 0.3);
+                padding: 6px 16px;
+              }
+              QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                  stop:0 rgba(109, 40, 217, 1),
+                  stop:1 rgba(88, 28, 135, 1));
+                border: 2px solid rgba(255, 255, 255, 0.5);
+              }
+              QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                  stop:0 rgba(88, 28, 135, 1),
+                  stop:1 rgba(76, 29, 149, 1));
+              }
+             </string>
+            </property>
+           </widget>
+          </item>
+          
           <!-- Mode Toggle (Run/Train) -->
           <item>
            <widget class="QFrame" name="toggleContainer">

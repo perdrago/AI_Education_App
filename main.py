@@ -1729,18 +1729,45 @@ class AICodingLab(QMainWindow):
         self.tabFunctions = self.running_mode_widget.findChild(QPushButton, "tabFunctions")
         self.tabWorkspace = self.running_mode_widget.findChild(QPushButton, "tabWorkspace")
 
+        # HIDE Lessons tab (moved to Tutorials button in header)
+        if self.tabExamples:
+            self.tabExamples.setVisible(False)
+
         if self.hubStackedWidget:
-            if self.tabExamples: self.tabExamples.clicked.connect(lambda: self._switch_hub_tab(0))
+            # Skip tabExamples connection (it's now in Tutorials View)
             if self.tabFunctions: self.tabFunctions.clicked.connect(lambda: self._switch_hub_tab(1))
             if self.tabWorkspace: self.tabWorkspace.clicked.connect(lambda: self._switch_hub_tab(2))
+            
+            # Set Functions tab as default (index 1)
+            self.hubStackedWidget.setCurrentIndex(1)
 
-        # Apply initial hub tab styling (Examples active by default)
-        self._update_hub_tab_styles(0)
+        # Apply initial hub tab styling (Functions active by default, not Examples)
+        self._update_hub_tab_styles(1)  # Changed from 0 to 1 (Functions)
 
         # Setup Level Navigation (must be after hubStackedWidget is found)
-        self._setup_level_navigation()
+        # Modified: Only setup Examples, Lessons moved to Tutorials View
+        self._setup_examples_only()
         self.populate_curriculum_hub()
-        self.populate_lessons()
+        
+        # Ensure Functions tab is active after setup
+        if self.hubStackedWidget:
+            self.hubStackedWidget.setCurrentIndex(1)
+            self._update_hub_tab_styles(1)
+        
+        # TUTORIALS VIEW SETUP (replaces Code Editor when clicked)
+        from src.modules.tutorials_view import TutorialsView
+        self._tutorials_view = TutorialsView(lang=self.current_lang)
+        
+        # Connect signals
+        self._tutorials_view.lesson_started.connect(self._on_tutorial_lesson_started)
+        self._tutorials_view.example_loaded.connect(self._on_tutorial_example_loaded)
+        self._tutorials_view.set_small_mode(self.is_small_screen)
+        
+        # Connect Tutorials button in header
+        self.btnTutorials = self.findChild(QPushButton, "btnTutorials")
+        if self.btnTutorials:
+            self.btnTutorials.clicked.connect(self.toggle_tutorials_view)
+            self._tutorials_view_open = False  # Track state
 
         # C) CONSOLE TERMINAL SETUP
         self.consoleContainer = self.running_mode_widget.findChild(QWidget, "consoleContainer")
@@ -3417,6 +3444,7 @@ class AICodingLab(QMainWindow):
         if hasattr(self, 'appSubtitle'): self.appSubtitle.setText(s["APP_SUBTITLE"])
         if hasattr(self, 'btnRunMode'): self.btnRunMode.setText(s["MODE_RUNNING"])
         if hasattr(self, 'btnTrainMode'): self.btnTrainMode.setText(s["MODE_TRAINING"])
+        if hasattr(self, 'btnTutorials'): self.btnTutorials.setText(s["BTN_TUTORIALS"])
         if hasattr(self, 'footerHints'): self.footerHints.setText(s["FOOTER_HINTS"])
         if hasattr(self, 'footerCredit'): self.footerCredit.setText(s["FOOTER_CREDIT"])
         if hasattr(self, 'btnResToggle') and self.btnResToggle: self.btnResToggle.setToolTip(s["TIP_RES_TOGGLE"])
@@ -3661,6 +3689,306 @@ class AICodingLab(QMainWindow):
 
     def show_training_mode(self):
         self.mainStack.setCurrentIndex(1)
+    
+    def show_tutorials_view(self):
+        """Show Tutorials View (replaces Code Editor)."""
+        # Populate tutorials view with lessons and examples
+        self._populate_tutorials_view()
+        
+        # Replace editor stack with tutorials view
+        if hasattr(self, 'editorStack') and hasattr(self, '_tutorials_view'):
+            # Store current editor widget
+            if not hasattr(self, '_editor_widget_backup'):
+                self._editor_widget_backup = self.editorStack.currentWidget()
+            
+            # Add tutorials view to editor stack if not already added
+            if self.editorStack.indexOf(self._tutorials_view) == -1:
+                self.editorStack.addWidget(self._tutorials_view)
+            
+            # Switch to tutorials view
+            self.editorStack.setCurrentWidget(self._tutorials_view)
+            
+            # Hide lesson-specific UI elements
+            if hasattr(self, '_step_progress_bar'):
+                self._step_progress_bar.setVisible(False)
+            if hasattr(self, '_requirements_panel'):
+                self._requirements_panel.setVisible(False)
+            if hasattr(self, 'btnHint'):
+                self.btnHint.setVisible(False)
+            if hasattr(self, 'btnSolution'):
+                self.btnSolution.setVisible(False)
+            
+            # Hide Run and Save buttons
+            if hasattr(self, 'btnRunCode'):
+                self.btnRunCode.setVisible(False)
+            if hasattr(self, 'btnSaveFile'):
+                self.btnSaveFile.setVisible(False)
+            
+            # Change editor title to "Tutorials"
+            if hasattr(self, 'editorTitle'):
+                s = STRINGS[self.current_lang]
+                tutorials_title = "📚 Tutorials" if self.current_lang == "en" else "📚 Hướng dẫn"
+                self.editorTitle.setText(tutorials_title)
+            
+            # Update button to "Close Tutorials" with red color
+            self._update_tutorials_button(is_open=True)
+            self._tutorials_view_open = True
+    
+    def toggle_tutorials_view(self):
+        """Toggle Tutorials View on/off."""
+        if hasattr(self, '_tutorials_view_open') and self._tutorials_view_open:
+            # Close tutorials view
+            self.hide_tutorials_view()
+        else:
+            # Open tutorials view
+            self.show_tutorials_view()
+    
+    def _update_tutorials_button(self, is_open):
+        """Update Tutorials button text and style based on state."""
+        if not hasattr(self, 'btnTutorials') or not self.btnTutorials:
+            return
+        
+        s = STRINGS[self.current_lang]
+        
+        if is_open:
+            # Change to "Close Tutorials" with red gradient
+            close_text = "✖ Close" if self.current_lang == "en" else "✖ Đóng"
+            self.btnTutorials.setText(close_text)
+            self.btnTutorials.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 #ef4444, stop:1 #dc2626);
+                    color: white;
+                    border: 2px solid rgba(255, 255, 255, 0.3);
+                    border-radius: 8px;
+                    padding: 8px 16px;
+                    font-weight: bold;
+                    font-size: 14px;
+                    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 #dc2626, stop:1 #b91c1c);
+                    border: 2px solid rgba(255, 255, 255, 0.5);
+                }
+            """)
+        else:
+            # Change back to "Tutorials" with purple gradient
+            tutorials_text = s.get("BTN_TUTORIALS", "📚 Tutorials")
+            self.btnTutorials.setText(tutorials_text)
+            self.btnTutorials.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 #8b5cf6, stop:1 #6d28d9);
+                    color: white;
+                    border: 2px solid rgba(255, 255, 255, 0.3);
+                    border-radius: 8px;
+                    padding: 8px 16px;
+                    font-weight: bold;
+                    font-size: 14px;
+                    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 #7c3aed, stop:1 #5b21b6);
+                    border: 2px solid rgba(255, 255, 255, 0.5);
+                }
+            """)
+    
+    def hide_tutorials_view(self):
+        """Hide Tutorials View and restore Code Editor."""
+        if hasattr(self, 'editorStack') and hasattr(self, '_editor_widget_backup'):
+            # Switch back to editor
+            self.editorStack.setCurrentWidget(self._editor_widget_backup)
+            
+            # Restore Run and Save buttons
+            if hasattr(self, 'btnRunCode'):
+                self.btnRunCode.setVisible(True)
+            if hasattr(self, 'btnSaveFile'):
+                self.btnSaveFile.setVisible(True)
+            
+            # Restore editor title
+            if hasattr(self, 'editorTitle'):
+                s = STRINGS[self.current_lang]
+                self.editorTitle.setText(s.get("EDITOR_TITLE", ">_ Code Editor"))
+            
+            # Update button back to "Tutorials" with purple color
+            self._update_tutorials_button(is_open=False)
+            self._tutorials_view_open = False
+    
+    def _populate_tutorials_view(self):
+        """Populate Tutorials View with lessons and examples data."""
+        if not hasattr(self, '_tutorials_view'):
+            return
+        
+        # Clear existing content
+        self._tutorials_view.clear_content()
+        
+        # Track if any content was added
+        content_added = False
+        
+        # Populate based on current view (lessons or examples)
+        if self._tutorials_view.current_view == "lessons":
+            content_added = self._populate_tutorials_lessons()
+        else:
+            content_added = self._populate_tutorials_examples()
+        
+        # Show empty state if no content was added
+        if not content_added:
+            self._tutorials_view.show_empty_state()
+    
+    def _populate_tutorials_lessons(self):
+        """Populate lessons in Tutorials View. Returns True if any lessons were added."""
+        # Load lessons from lesson_structure.json
+        import json
+        lessons_file = Path("lessons/lesson_structure.json")
+        if not lessons_file.exists():
+            return False
+        
+        content_added = False
+        
+        try:
+            with open(lessons_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            lessons = data.get("lessons", [])
+            for lesson in lessons:
+                # IMPORTANT: Convert ID to string explicitly
+                lesson_id = str(lesson.get("id", ""))
+                
+                lesson_data = {
+                    "id": lesson_id,  # Already converted to string
+                    "title": lesson.get(f"title_{self.current_lang}", lesson.get("title", "")),
+                    "description": lesson.get(f"description_{self.current_lang}", lesson.get("description", "")),
+                    "icon": lesson.get("icon", "📚"),
+                    "level": lesson.get("level", "Beginner"),
+                    "steps": lesson.get("steps", []),
+                    "is_active": False  # Check if lesson is currently active
+                }
+                
+                # Check if this lesson is currently active
+                if hasattr(self, '_current_lesson_id') and self._current_lesson_id == lesson_id:
+                    lesson_data["is_active"] = True
+                
+                # add_lesson_card will filter by level internally
+                # We need to check if it was actually added
+                initial_count = self._tutorials_view.content_layout.count()
+                self._tutorials_view.add_lesson_card(lesson_data)
+                if self._tutorials_view.content_layout.count() > initial_count:
+                    content_added = True
+                    
+        except Exception as e:
+            print(f"Error loading lessons for tutorials view: {e}")
+        
+        return content_added
+    
+    def _populate_tutorials_examples(self):
+        """Populate examples in Tutorials View. Returns True if any examples were added."""
+        # Scan curriculum folder for examples
+        curriculum_dir = Path("curriculum")
+        if not curriculum_dir.exists():
+            return False
+        
+        content_added = False
+        
+        for py_file in sorted(curriculum_dir.glob("*.py")):
+            # Parse example metadata from file
+            example_data = self._parse_example_metadata(py_file)
+            if example_data:
+                # add_example_card will filter by level internally
+                initial_count = self._tutorials_view.content_layout.count()
+                self._tutorials_view.add_example_card(example_data)
+                if self._tutorials_view.content_layout.count() > initial_count:
+                    content_added = True
+        
+        return content_added
+    
+    def _parse_example_metadata(self, file_path):
+        """Parse example metadata from Python file comments."""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Extract metadata from comments
+            import re
+            
+            # Try both TITLE and TITLE_VI based on current language
+            if self.current_lang == "vi":
+                title_match = re.search(r'#\s*TITLE_VI:\s*(.+)', content)
+                if not title_match:
+                    title_match = re.search(r'#\s*TITLE:\s*(.+)', content)
+            else:
+                title_match = re.search(r'#\s*TITLE:\s*(.+)', content)
+            
+            # Try both DESC and DESC_VI based on current language
+            if self.current_lang == "vi":
+                desc_match = re.search(r'#\s*DESC_VI:\s*(.+)', content)
+                if not desc_match:
+                    desc_match = re.search(r'#\s*DESC:\s*(.+)', content)
+            else:
+                desc_match = re.search(r'#\s*DESC:\s*(.+)', content)
+            
+            # Also try DESCRIPTION for backwards compatibility
+            if not desc_match:
+                desc_match = re.search(r'#\s*DESCRIPTION:\s*(.+)', content)
+            
+            level_match = re.search(r'#\s*LEVEL:\s*(Beginner|Intermediate|Advanced)', content)
+            icon_match = re.search(r'#\s*ICON:\s*(.+)', content)
+            
+            return {
+                "title": title_match.group(1).strip() if title_match else file_path.stem.replace('_', ' ').title(),
+                "description": desc_match.group(1).strip() if desc_match else "Experiment with this example.",
+                "level": level_match.group(1) if level_match else "Beginner",
+                "icon": icon_match.group(1).strip() if icon_match else "🎯",
+                "file_path": str(file_path)
+            }
+        except Exception as e:
+            print(f"Error parsing example {file_path}: {e}")
+            return None
+            print(f"Error parsing example {file_path}: {e}")
+            return None
+    
+    def _on_tutorial_lesson_started(self, lesson_id, step_number):
+        """Handle when user clicks Start on a lesson in Tutorials View."""
+        try:
+            # Hide tutorials view
+            self.hide_tutorials_view()
+            
+            # Convert lesson_id to string if needed
+            lesson_id_str = str(lesson_id)
+            
+            # Start the lesson using existing method
+            self.load_lesson_by_id(lesson_id_str)
+            
+            # Make sure Functions tab is active in Learning Hub
+            if hasattr(self, 'hubStackedWidget'):
+                self._switch_hub_tab(1)  # Switch to Functions
+                
+        except Exception as e:
+            print(f"Failed to start lesson: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _on_tutorial_example_loaded(self, file_path):
+        """Handle when user clicks Load on an example in Tutorials View."""
+        try:
+            # Hide tutorials view
+            self.hide_tutorials_view()
+            
+            # Extract filename from path (file_path is like "curriculum/my_first_camera.py")
+            from pathlib import Path
+            filename = Path(file_path).name
+            
+            # Load the example file using existing method
+            self.load_curriculum_example(filename)
+            
+            # Make sure Functions tab is active in Learning Hub
+            if hasattr(self, 'hubStackedWidget'):
+                self._switch_hub_tab(1)  # Switch to Functions
+        except Exception as e:
+            print(f"Failed to load example: {e}")
+            import traceback
+            traceback.print_exc()
 
     # --- Workspace Logic ---
     def _rebuild_workspace_cards(self):
@@ -4293,6 +4621,113 @@ class AICodingLab(QMainWindow):
         splitter.setSizes([650, 350])
 
         main_layout.addWidget(splitter)
+
+        # Set Beginner active
+        self._level_badges["Beginner"].set_active(True)
+    
+    def _setup_examples_only(self):
+        """Setup only Examples section (Lessons moved to Tutorials View)."""
+        if not self.hubStackedWidget:
+            return
+        
+        page = self.hubStackedWidget.widget(0)  # pageExamples
+        if not page:
+            return
+
+        # Remove existing layout if any
+        old_layout = page.layout()
+        if old_layout:
+            while old_layout.count():
+                child = old_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+            QWidget().setLayout(old_layout)
+
+        # New main layout
+        main_layout = QVBoxLayout(page)
+        main_layout.setContentsMargins(4, 4, 4, 0)
+        main_layout.setSpacing(6)
+
+        # ══════════════════════════════════════════════════════════
+        # EXAMPLES SECTION (from curriculum folder)
+        # ══════════════════════════════════════════════════════════
+        examples_widget = QWidget()
+        examples_layout = QVBoxLayout(examples_widget)
+        examples_layout.setContentsMargins(0, 0, 0, 0)
+        examples_layout.setSpacing(6)
+
+        # Examples Header
+        s = STRINGS[self.current_lang]
+        self._examples_header = QLabel(s.get("EXAMPLES_HEADER", "🎯 Examples" if self.current_lang == "en" else "🎯 Ví dụ"))
+        self._examples_header.setStyleSheet("""
+            font-size: 16px;
+            font-weight: bold;
+            color: #1e293b;
+            padding: 8px;
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 rgba(139, 92, 246, 0.15),
+                stop:1 rgba(59, 130, 246, 0.15));
+            border-radius: 8px;
+        """)
+        examples_layout.addWidget(self._examples_header)
+
+        # Level Navigation Bar
+        is_small = self.is_small_screen
+        bar_h = 36 if is_small else 50
+        bar_br = bar_h // 2
+
+        nav_container = QFrame()
+        nav_container.setObjectName("levelNavBar")
+        nav_container.setFixedHeight(bar_h)
+        nav_container.setStyleSheet(f"""
+            QFrame#levelNavBar {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(139, 92, 246, 0.35),
+                    stop:0.4 rgba(109, 40, 217, 0.25),
+                    stop:0.7 rgba(59, 130, 246, 0.25),
+                    stop:1 rgba(6, 182, 212, 0.2));
+                border-radius: {bar_br}px;
+                border: 1.5px solid rgba(139, 92, 246, 0.3);
+            }}
+        """)
+
+        nav_bar = QHBoxLayout(nav_container)
+        nav_bar.setContentsMargins(8, 4, 8, 4)
+        nav_bar.setSpacing(12 if is_small else 20)
+        nav_bar.setAlignment(Qt.AlignCenter)
+
+        self._level_badges = {}
+        self._active_level = "Beginner"
+        self._curriculum_cards = []
+        self._nav_container = nav_container
+
+        for level_key, cfg in LEVEL_CONFIG.items():
+            badge = LevelBadge(level_key, cfg["color"], cfg["icon"], is_small=is_small)
+            badge.retranslate(s)
+            badge.level_clicked.connect(self._on_level_selected)
+            self._level_badges[level_key] = badge
+            nav_bar.addWidget(badge)
+
+        examples_layout.addWidget(nav_container, 0, Qt.AlignCenter)
+
+        # Examples Scroll Area
+        self._examples_scroll = QScrollArea()
+        self._examples_scroll.setWidgetResizable(True)
+        self._examples_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._examples_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._examples_scroll.setFrameShape(QFrame.NoFrame)
+        self._examples_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+
+        scroll_contents = QWidget()
+        scroll_contents.setStyleSheet("background: transparent;")
+        self._cards_layout = QVBoxLayout(scroll_contents)
+        self._cards_layout.setContentsMargins(4, 0, 4, 0)
+        self._cards_layout.setSpacing(6)
+        self._examples_scroll.setWidget(scroll_contents)
+
+        examples_layout.addWidget(self._examples_scroll)
+
+        main_layout.addWidget(examples_widget)
 
         # Set Beginner active
         self._level_badges["Beginner"].set_active(True)
