@@ -1,0 +1,22 @@
+{
+  "lesson_1": {
+    "step_1": ["Init_Camera", "Get_Camera_Frame", "Show_Image", "Close_Camera"],
+    "step_2": ["Init_Camera", "Get_Camera_Frame", "Save_Frame", "Load_Image", "Show_Image"],
+    "step_3": ["Init_Camera", "Get_Camera_Frame", "flip_image", "Show_Image"],
+    "step_4": ["Init_Camera", "Get_Camera_Frame", "adjust_brightness", "Show_Image"],
+    "step_5": ["Init_Camera", "Get_Camera_Frame", "rotate_image", "Show_Image"]
+  },
+  "lesson_2": {
+    "step_1": ["Load_Image", "convert_to_gray", "apply_blur", "detect_edges", "Show_Image"],
+    "step_2": ["Load_Image", "apply_blur", "Show_Image"],
+    "step_3": ["Load_Image", "detect_edges", "Show_Image"],
+    "step_4": ["Load_Image", "resize_image", "Show_Image"],
+    "step_5": ["Load_Image", "convert_to_gray", "apply_blur", "detect_edges", "Show_Image"]
+  },
+  "lesson_3": {
+    "step_1": ["Load_Image", "Draw_Rectangle", "Show_Image"],
+    "step_2": ["Load_Image", "Draw_Circle", "Show_Image"],
+    "step_3": ["Load_Image", "Draw_Rectangle", "Draw_Circle", "Draw_Line", "Show_Image"],
+    "step_4": ["Load_Image", "Draw_Rectangle", "Draw_Circle", "Show_Image"]
+  }
+}

@@ -179,6 +179,10 @@ class GameLessonWidget(QFrame):
         self._blank_boxes.clear()
         self._instruction_labels.clear()
         
+        print(f"🎮 GameLessonWidget.set_blank_mode called")
+        print(f"   Display lines: {len(parsed_step.display_lines)}")
+        print(f"   Blank map keys: {list(parsed_step.blank_map.keys())}")
+        
         while self._content_layout.count():
             item = self._content_layout.takeAt(0)
             if item.widget():
@@ -209,6 +213,7 @@ class GameLessonWidget(QFrame):
 
         for line_num, line in enumerate(lines):
             if line_num in blank_map:
+                print(f"   ✅ Found blank at line {line_num}: {line}")
                 if current_code_block:
                     self._add_code_block(current_code_block)
                     current_code_block = []

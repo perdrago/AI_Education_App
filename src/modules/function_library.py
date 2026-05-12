@@ -25,6 +25,12 @@ _CAT_KEY_MAP = {
     "Robotics": "CAT_ROBOTICS",
 }
 
+# Categories that are ALWAYS unlocked (no lesson required)
+ALWAYS_UNLOCKED_CATEGORIES = {"Logic Operations", "Variables"}
+
+# Categories that are LOCKED by default – functions unlock via lessons
+LOCKED_CATEGORIES = {"Camera", "Image Processing", "AI Vision Core", "Display & Dashboard", "Robotics"}
+
 # Mapping from function IDs → description translation keys
 _FN_DESC_KEY_MAP = {
     "Init_Camera": "FN_INIT_CAMERA",
@@ -279,7 +285,7 @@ class ToggleLabel(QLabel):
 class DraggableFunctionBlock(QFrame):
     expandRequested = pyqtSignal(object)
 
-    def __init__(self, func_id, info, category_color, category_icon="🌣", is_small=False, lang="en"):
+    def __init__(self, func_id, info, category_color, category_icon="🌣", is_small=False, lang="en", is_locked=False):
         super().__init__()
         self.func_id        = func_id
         self.info           = info
@@ -287,6 +293,7 @@ class DraggableFunctionBlock(QFrame):
         self.category_icon  = category_icon
         self._expanded      = False
         self._lang          = lang
+        self._is_locked     = is_locked
 
         # Resolve translated description
         s = STRINGS.get(lang, STRINGS["en"])
@@ -311,7 +318,11 @@ class DraggableFunctionBlock(QFrame):
         self._header = QFrame()
         self._header.setObjectName("FunctionBlock")
         self._set_header_style(expanded=False)
-        self._header.setCursor(Qt.PointingHandCursor)
+        # Locked functions are not expandable (cursor stays arrow)
+        if not is_locked:
+            self._header.setCursor(Qt.PointingHandCursor)
+        else:
+            self._header.setCursor(Qt.ForbiddenCursor)
 
         row = QHBoxLayout(self._header)
         _rm = 6 if is_small else 10
@@ -327,13 +338,22 @@ class DraggableFunctionBlock(QFrame):
         i_font = 12 if is_small else 18
         icon_lbl.setFixedSize(i_box, i_box)
         icon_lbl.setAlignment(Qt.AlignCenter)
-        icon_lbl.setStyleSheet(f"""
-            background-color: {category_color};
-            color: #ffffff;
-            border-radius: {'6px' if is_small else '10px'};
-            font-size: {i_font}px;
-            font-weight: bold;
-        """)
+        if is_locked:
+            icon_lbl.setStyleSheet(f"""
+                background-color: #94a3b8;
+                color: #cbd5e1;
+                border-radius: {'6px' if is_small else '10px'};
+                font-size: {i_font}px;
+                font-weight: bold;
+            """)
+        else:
+            icon_lbl.setStyleSheet(f"""
+                background-color: {category_color};
+                color: #ffffff;
+                border-radius: {'6px' if is_small else '10px'};
+                font-size: {i_font}px;
+                font-weight: bold;
+            """)
         row.addWidget(icon_lbl, 0, Qt.AlignTop)
 
         # Name + desc
@@ -342,13 +362,20 @@ class DraggableFunctionBlock(QFrame):
         name_lbl = QLabel(func_id)
         name_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
         n_size = 11 if is_small else 16
-        name_lbl.setStyleSheet(
-            f"font-weight: 700; color: #1e293b; font-size: {n_size}px; background: transparent;"
-        )
+        if is_locked:
+            name_lbl.setStyleSheet(
+                f"font-weight: 700; color: #94a3b8; font-size: {n_size}px; background: transparent;"
+            )
+        else:
+            name_lbl.setStyleSheet(
+                f"font-weight: 700; color: #1e293b; font-size: {n_size}px; background: transparent;"
+            )
         short_desc = QLabel(translated_desc)
         short_desc.setAttribute(Qt.WA_TransparentForMouseEvents)
         d_size = 9 if is_small else 14
         short_desc.setStyleSheet(
+            f"color: #cbd5e1; font-size: {d_size}px; background: transparent;"
+            if is_locked else
             f"color: #94a3b8; font-size: {d_size}px; background: transparent;"
         )
         short_desc.setWordWrap(True)
@@ -356,20 +383,32 @@ class DraggableFunctionBlock(QFrame):
         text_box.addWidget(short_desc)
         row.addLayout(text_box, stretch=1)
 
-        self._arrow = ToggleLabel()
-        self._arrow.setAttribute(Qt.WA_TransparentForMouseEvents)
-        row.addWidget(self._arrow, 0, Qt.AlignTop)
+        if is_locked:
+            # Show lock icon instead of expand arrow
+            lock_lbl = QLabel("🔒")
+            lock_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
+            _lock_fs = 12 if is_small else 16
+            lock_lbl.setStyleSheet(
+                f"font-size: {_lock_fs}px; background: transparent; color: #94a3b8;"
+            )
+            row.addWidget(lock_lbl, 0, Qt.AlignTop)
+        else:
+            self._arrow = ToggleLabel()
+            self._arrow.setAttribute(Qt.WA_TransparentForMouseEvents)
+            row.addWidget(self._arrow, 0, Qt.AlignTop)
 
-        # 🖱️ Make the whole header clickable for smooth interaction
-        self._header.mousePressEvent = self._on_header_pressed
-        self._header.mouseReleaseEvent = self._on_header_released
+        if not is_locked:
+            # 🖱️ Make the whole header clickable for smooth interaction
+            self._header.mousePressEvent = self._on_header_pressed
+            self._header.mouseReleaseEvent = self._on_header_released
 
         self._root.addWidget(self._header)
 
-        # ── Info panel (hidden) ──────────────────────────────
-        self._panel = FunctionInfoPanel(func_id, info, category_color, is_small=is_small, lang=lang)
-        self._panel.setVisible(False)
-        self._root.addWidget(self._panel)
+        # ── Info panel (hidden, not shown for locked functions) ──
+        if not is_locked:
+            self._panel = FunctionInfoPanel(func_id, info, category_color, is_small=is_small, lang=lang)
+            self._panel.setVisible(False)
+            self._root.addWidget(self._panel)
 
     def _on_header_pressed(self, event):
         self._drag_start_pos = event.pos()
@@ -384,6 +423,8 @@ class DraggableFunctionBlock(QFrame):
 
     def collapse(self):
         """Force-close this block if it's expanded."""
+        if self._is_locked:
+            return
         if self._expanded:
             self._expanded = False
             self._panel.setVisible(False)
@@ -391,6 +432,8 @@ class DraggableFunctionBlock(QFrame):
             self._set_header_style(False)
 
     def _toggle(self):
+        if self._is_locked:
+            return
         # If we are about to expand, notify others to collapse
         if not self._expanded:
             self.expandRequested.emit(self)
@@ -402,7 +445,17 @@ class DraggableFunctionBlock(QFrame):
 
     def _set_header_style(self, expanded):
         c = self.category_color
-        if expanded:
+        if self._is_locked:
+            # Locked: muted grey style, no hover effect
+            self._header.setStyleSheet("""
+                QFrame#FunctionBlock {
+                    background: #f8fafc;
+                    border: 1px solid #e2e8f0;
+                    border-radius: 10px;
+                    opacity: 0.6;
+                }
+            """)
+        elif expanded:
             self._header.setStyleSheet(f"""
                 QFrame#FunctionBlock {{
                     background: white;
@@ -427,6 +480,9 @@ class DraggableFunctionBlock(QFrame):
     # ── Drag ────────────────────────────────────────────────
 
     def mouseMoveEvent(self, event):
+        # Locked functions cannot be dragged into editor
+        if self._is_locked:
+            return
         if event.buttons() != Qt.LeftButton:
             return
         drag = QDrag(self)
@@ -443,8 +499,8 @@ class DraggableFunctionBlock(QFrame):
 # ────────────────────────────────────────────────────────────
 
 class CategoryHeader(QPushButton):
-    def __init__(self, title, count, color, icon="📂", is_small=False):
-        super().__init__()
+    def __init__(self, title, count, color, icon="📂", is_small=False, parent=None):
+        super().__init__(parent)
         self.setCheckable(True)
         self.setChecked(False)
         self.setFixedHeight(30 if is_small else 52)
@@ -488,14 +544,18 @@ class CategoryHeader(QPushButton):
         )
         title_lbl.setAlignment(Qt.AlignVCenter)
 
-        # Count badge
+        # Count badge - Fixed width for alignment
         count_lbl = QLabel(str(count))
         count_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
-        count_lbl.setStyleSheet("""
+        c_font = 10 if is_small else 14
+        c_width = 45 if is_small else 65
+        count_lbl.setFixedWidth(c_width)
+        count_lbl.setAlignment(Qt.AlignCenter)
+        count_lbl.setStyleSheet(f"""
             background: rgba(255,255,255,0.25);
             border-radius: 6px;
-            padding: 4px 10px;
-            font-size: 12px;
+            padding: 4px 8px;
+            font-size: {c_font}px;
             font-weight: bold;
             color: white;
         """)
@@ -510,14 +570,31 @@ class CategoryHeader(QPushButton):
 #  Populate the Functions Tab
 # ────────────────────────────────────────────────────────────
 
-def populate_functions_tab(running_mode_widget, is_small=False, lang="en"):
+def populate_functions_tab(running_mode_widget, is_small=False, lang="en", unlocked_functions=None):
+    """Populate the functions tab with lock-aware function blocks.
+    
+    Args:
+        running_mode_widget: The widget containing functionsListLayout
+        is_small: Whether to use compact sizing
+        lang: Language code ('en' or 'vi')
+        unlocked_functions: Set of unlocked function IDs for LOCKED_CATEGORIES.
+                            Functions in ALWAYS_UNLOCKED_CATEGORIES are always shown.
+                            If None, ALL functions are unlocked (no lock system).
+    """
     layout = running_mode_widget.findChild(QVBoxLayout, "functionsListLayout")
 
-    # Remove all existing items (widgets + spacers)
+    # Remove all existing items (widgets + spacers) and disconnect signals
     while layout.count():
         item = layout.takeAt(0)
         if item.widget():
-            item.widget().setParent(None)
+            widget = item.widget()
+            # Disconnect all signals to prevent memory leaks and duplicate connections
+            try:
+                widget.clicked.disconnect()
+            except:
+                pass
+            widget.setParent(None)
+            widget.deleteLater()
 
     # Pin content to top — critical so collapsed headers sit at top, not center
     layout.setAlignment(Qt.AlignTop)
@@ -535,52 +612,98 @@ def populate_functions_tab(running_mode_widget, is_small=False, lang="en"):
                 block.collapse()
 
     def on_category_clicked(checked, clicked_header, clicked_container):
+        print(f"🔍 Category clicked: checked={checked}, header={clicked_header.text() if hasattr(clicked_header, 'text') else 'unknown'}")
         if checked:
-            # 1. Collapse all other categories
+            # 1. Collapse all other categories (ACCORDION BEHAVIOR)
             for btn, cont in zip(all_category_buttons, all_category_containers):
                 if btn != clicked_header:
                     btn.setChecked(False)
                     cont.setVisible(False)
+                    print(f"  ✅ Collapsed: {btn.text() if hasattr(btn, 'text') else 'unknown'}")
             # 2. Collapse all function blocks for a fresh start
             collapse_all_blocks(None)
             clicked_container.setVisible(True)
+            print(f"  ✅ Opened clicked container")
         else:
             clicked_container.setVisible(False)
+            print(f"  ✅ Closed clicked container")
 
     for cat_name, cat_data in LIBRARY_FUNCTIONS.items():
         color = cat_data["color"]
         icon  = cat_data.get("icon", "📂")
-        count = len(cat_data["functions"])
+        functions = cat_data["functions"]
+
+        # Determine lock state for this category
+        cat_always_open = cat_name in ALWAYS_UNLOCKED_CATEGORIES
+        cat_locked = cat_name in LOCKED_CATEGORIES
 
         # Translate category name
         cat_key = _CAT_KEY_MAP.get(cat_name)
         display_name = s.get(cat_key, cat_name) if cat_key else cat_name
 
-        header = CategoryHeader(display_name, count, color, icon=icon, is_small=is_small)
+        # Count unlocked functions for badge
+        if unlocked_functions is None or cat_always_open:
+            unlocked_count = len(functions)
+        else:
+            unlocked_count = sum(
+                1 for fid in functions if fid in (unlocked_functions or set())
+            )
+        total_count = len(functions)
+        
+        # Show lock indicator on category header if some functions are locked
+        # Always show "X/Y" format for consistency and visual alignment
+        if cat_locked and unlocked_functions is not None:
+            # Show count as "unlocked/total" to show progress
+            display_count = f"{unlocked_count}/{total_count}"
+        elif cat_always_open:
+            # For always-unlocked categories, show "total/total" (e.g., "8/8", "5/5")
+            display_count = f"{total_count}/{total_count}"
+        else:
+            # Fallback: just show total
+            display_count = f"{total_count}/{total_count}"
+
+        header = CategoryHeader(display_name, display_count, color, icon=icon, is_small=is_small, parent=running_mode_widget)
         layout.addWidget(header)
         all_category_buttons.append(header)
 
-        container = QWidget()
+        container = QWidget(running_mode_widget)
         container.setStyleSheet("background: transparent;")
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(0, 2, 0, 6)
         container_layout.setSpacing(4)
+        container.setVisible(False)  # IMPORTANT: Start hidden
+        container.setWindowFlags(Qt.Widget)  # Ensure it's not a separate window
         all_category_containers.append(container)
 
+        # FIX: Use default arguments to capture current values in closure
         header.clicked.connect(lambda chk, h=header, c=container: on_category_clicked(chk, h, c))
 
-        for func_id, info in cat_data["functions"].items():
+        for func_id, info in functions.items():
+            # Determine if this specific function is locked
+            if unlocked_functions is None or cat_always_open:
+                is_locked = False
+            elif cat_locked:
+                is_locked = func_id not in unlocked_functions
+            else:
+                is_locked = False
+
             block = DraggableFunctionBlock(
                 func_id=func_id,
                 info=info,
                 category_color=color,
                 category_icon=icon,
                 is_small=is_small,
-                lang=lang
+                lang=lang,
+                is_locked=is_locked
             )
             all_blocks.append(block)
-            block.expandRequested.connect(collapse_all_blocks)
+            if not is_locked:
+                block.expandRequested.connect(collapse_all_blocks)
             container_layout.addWidget(block)
 
-        container.setVisible(False)
+        # Add container to layout AFTER it's fully populated
         layout.addWidget(container)
+    
+    # ✅ SIMPLE APPROACH: No auto-expand, just unlock functions
+    # Users can manually open categories to see unlocked functions
+    print(f"✅ Function sidebar populated. {len(unlocked_functions) if unlocked_functions else 0} functions unlocked.")

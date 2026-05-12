@@ -1,293 +1,195 @@
 """
-Tutorials View - Displays Lessons and Examples in a unified interface
-Replaces the Code Editor when user clicks "Tutorials" button in header
+Tutorials View - Clean Modern UI matching design specifications
+Displays Lessons and Examples with precise styling
 """
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QFrame, QSizePolicy
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt, pyqtSignal, QPointF
+from PyQt5.QtGui import QFont, QPainter, QColor, QPen, QPolygonF
 
 
 class TutorialsView(QWidget):
     """
-    Tutorials View widget that shows Lessons or Examples based on toggle.
-    Emits signals when user clicks Start (lesson) or Load (example).
+    Tutorials View widget - Clean modern design
     """
     
     lesson_started = pyqtSignal(str, int)  # lesson_id, step_number
     example_loaded = pyqtSignal(str)  # example_file_path
     
-    def __init__(self, parent=None, lang="en"):
+    def __init__(self, parent=None, lang="en", view_type="examples"):
         super().__init__(parent)
         self.lang = lang
-        self.current_view = "lessons"  # "lessons" or "examples"
+        self.view_type = view_type  # "lessons" or "examples"
+        self.current_level_filter = "Beginner"
         self._is_small = False
         
+        # Main background color
         self.setStyleSheet("""
             QWidget {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #f8fafc, stop:1 #e0e7ff);
+                background: #1E1E2E;
+                font-family: 'Segoe UI', 'Inter', Arial, sans-serif;
             }
         """)
         
-        # Main layout
+        # Main layout with generous margins
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(20)
+        main_layout.setSpacing(15)
         
-        # Combined container for both toggle buttons and level badges
-        combined_outer_container = QFrame()
-        combined_outer_container.setObjectName("combinedOuterContainer")
-        combined_outer_container.setStyleSheet("""
-            QFrame#combinedOuterContainer {
+        # Top container for title and timeline
+        top_container = QFrame()
+        top_container.setStyleSheet("QFrame { background: transparent; }")
+        top_container_layout = QVBoxLayout(top_container)
+        top_container_layout.setContentsMargins(0, 0, 0, 0)
+        top_container_layout.setSpacing(20)
+        
+        # Single title button (centered) - no toggle needed
+        title_container = QWidget()
+        title_container.setStyleSheet("QWidget { background: transparent; }")
+        title_layout = QHBoxLayout(title_container)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setAlignment(Qt.AlignCenter)
+        
+        # Add stretch to push title to center and coins to right
+        title_layout.addStretch()
+        
+        # Create single button based on view_type
+        if view_type == "lessons":
+            button_text = "Lessons" if lang == "en" else "Bài học"
+        else:
+            button_text = "Examples" if lang == "en" else "Ví dụ"
+        
+        self.title_button = QPushButton(button_text)
+        self.title_button.setFixedHeight(40)
+        self.title_button.setMinimumWidth(200)
+        self.title_button.setEnabled(False)  # Not clickable, just a label
+        self.title_button.setStyleSheet("""
+            QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #e0e7ff, stop:0.5 #f3e8ff, stop:1 #fce7f3);
+                    stop:0 #8B5CF6, stop:1 #6366F1);
+                color: #FFFFFF;
+                border: none;
                 border-radius: 20px;
-                padding: 15px;
+                font-size: 15px;
+                font-weight: bold;
+                padding: 8px 30px;
             }
         """)
         
-        combined_layout = QVBoxLayout(combined_outer_container)
-        combined_layout.setContentsMargins(0, 0, 0, 0)
-        combined_layout.setSpacing(15)
+        title_layout.addWidget(self.title_button)
         
-        # Toggle buttons (Lessons | Examples)
-        toggle_container = QWidget()
-        toggle_container.setStyleSheet("QWidget { background: transparent; }")  # Make transparent
-        toggle_layout = QHBoxLayout(toggle_container)
-        toggle_layout.setContentsMargins(0, 0, 0, 0)
-        toggle_layout.setSpacing(0)
-        toggle_layout.setAlignment(Qt.AlignCenter)
+        # Add stretch to center the title
+        title_layout.addStretch()
         
-        # Lessons button
-        lessons_text = "📚 Lessons" if lang == "en" else "📚 Bài học"
-        self.btn_lessons = QPushButton(lessons_text)
-        self.btn_lessons.setFixedSize(200, 60)
-        self.btn_lessons.setCursor(Qt.PointingHandCursor)
-        self.btn_lessons.setCheckable(True)
-        self.btn_lessons.setChecked(True)
-        self.btn_lessons.clicked.connect(lambda: self.switch_view("lessons"))
+        # Add Coins Display (only for examples view)
+        if view_type == "examples":
+            from src.modules.stars_coins_widget import CoinsDisplayWidget
+            self.coins_widget = CoinsDisplayWidget(lang=lang)
+            title_layout.addWidget(self.coins_widget)
+            
+            # Load initial coins from progress manager
+            try:
+                from src.modules.progress_manager import get_progress_manager
+                pm = get_progress_manager()
+                self.coins_widget.set_coins(pm.get_total_coins())
+                print(f"💰 Coins display initialized: {pm.get_total_coins()} coins")
+            except Exception as e:
+                print(f"⚠️ Could not load coins: {e}")
+                self.coins_widget.set_coins(0)
+        else:
+            self.coins_widget = None
         
-        # Examples button
-        examples_text = "🎯 Examples" if lang == "en" else "🎯 Ví dụ"
-        self.btn_examples = QPushButton(examples_text)
-        self.btn_examples.setFixedSize(200, 60)
-        self.btn_examples.setCursor(Qt.PointingHandCursor)
-        self.btn_examples.setCheckable(True)
-        self.btn_examples.clicked.connect(lambda: self.switch_view("examples"))
+        top_container_layout.addWidget(title_container)
         
-        # Apply toggle styles
-        self._apply_toggle_styles()
+        # Progress Timeline
+        timeline_container = QWidget()
+        timeline_container.setStyleSheet("QWidget { background: transparent; }")
+        timeline_layout = QHBoxLayout(timeline_container)
+        timeline_layout.setContentsMargins(0, 0, 0, 0)
+        timeline_layout.setSpacing(0)
+        timeline_layout.setAlignment(Qt.AlignCenter)
         
-        toggle_layout.addWidget(self.btn_lessons)
-        toggle_layout.addWidget(self.btn_examples)
-        
-        combined_layout.addWidget(toggle_container)
-        
-        # Level filter badges container with different gradient (more vibrant)
-        level_outer_container = QFrame()
-        level_outer_container.setObjectName("levelOuterContainer")
-        level_outer_container.setStyleSheet("""
-            QFrame#levelOuterContainer {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #c7d2fe, stop:0.5 #ddd6fe, stop:1 #f5d0fe);
-                border-radius: 16px;
-                padding: 10px 15px;
-            }
-        """)
-        level_outer_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)  # Fixed size to fit content
-        
-        level_outer_layout = QVBoxLayout(level_outer_container)
-        level_outer_layout.setContentsMargins(0, 0, 0, 0)
-        level_outer_layout.setSpacing(0)
-        level_outer_layout.setSizeConstraint(QVBoxLayout.SetFixedSize)  # Shrink to content
-        
-        self.level_filter_container = QWidget()
-        self.level_filter_container.setStyleSheet("QWidget { background: transparent; }")  # Make transparent
-        level_filter_layout = QHBoxLayout(self.level_filter_container)
-        level_filter_layout.setContentsMargins(0, 0, 0, 0)
-        level_filter_layout.setSpacing(20)
-        level_filter_layout.setAlignment(Qt.AlignCenter)
-        
-        self.current_level_filter = "Beginner"  # Default filter
-        self.level_badges = {}
-        
-        # Create level badges with smaller size (60x60)
+        self.timeline_nodes = {}
         levels = [
-            ("Beginner", "⭐", "#22c55e"),
-            ("Intermediate", "🚀", "#f59e0b"),
-            ("Advanced", "🏆", "#ef4444")
+            ("Beginner", 1, "Basic"),
+            ("Intermediate", 2, "Intermediate"),
+            ("Advanced", 3, "Advanced")
         ]
         
-        for level, icon, color in levels:
-            badge = QPushButton(f"{icon}")
-            badge.setFixedSize(60, 60)  # Smaller size
-            badge.setCursor(Qt.PointingHandCursor)
-            badge.setCheckable(True)
-            badge.setChecked(level == "Beginner")  # Beginner active by default
-            badge.clicked.connect(lambda checked, l=level: self.filter_by_level(l))
+        for idx, (level, level_number, label_text) in enumerate(levels):
+            # Create timeline node with hexagon badge
+            node = TimelineNode(level_number, label_text, level == "Beginner")
+            node.clicked.connect(lambda l=level: self.filter_by_level(l))
+            self.timeline_nodes[level] = node
+            timeline_layout.addWidget(node)
             
-            # Store badge reference
-            self.level_badges[level] = badge
-            level_filter_layout.addWidget(badge)
+            # Add connecting line
+            if idx < len(levels) - 1:
+                line = QFrame()
+                line.setFrameShape(QFrame.HLine)
+                line.setFixedHeight(2)
+                line.setFixedWidth(100)
+                line.setStyleSheet("""
+                    background: #3F3F5A;
+                    border: none;
+                    margin-top: 30px;
+                """)
+                timeline_layout.addWidget(line)
         
-        # Apply initial badge styles
-        self._apply_level_badge_styles()
-        
-        level_outer_layout.addWidget(self.level_filter_container)
-        
-        # Wrapper to center the level container
-        level_wrapper = QWidget()
-        level_wrapper.setStyleSheet("QWidget { background: transparent; }")
-        level_wrapper_layout = QHBoxLayout(level_wrapper)
-        level_wrapper_layout.setContentsMargins(0, 0, 0, 0)
-        level_wrapper_layout.setAlignment(Qt.AlignCenter)
-        level_wrapper_layout.addWidget(level_outer_container)
-        
-        combined_layout.addWidget(level_wrapper)
-        
-        main_layout.addWidget(combined_outer_container)
+        top_container_layout.addWidget(timeline_container)
+        main_layout.addWidget(top_container)
         
         # Content area (scrollable)
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.NoFrame)
-        self.scroll_area.setStyleSheet("QScrollArea { background: transparent; }")
+        self.scroll_area.setStyleSheet("""
+            QScrollArea { 
+                background: transparent; 
+                border: none;
+            }
+            QScrollBar:vertical {
+                background: #2A2A3C;
+                width: 10px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical {
+                background: #8B5CF6;
+                border-radius: 5px;
+            }
+        """)
         
         self.content_widget = QWidget()
+        self.content_widget.setStyleSheet("QWidget { background: transparent; }")
         self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(10, 10, 10, 10)
-        self.content_layout.setSpacing(15)
+        self.content_layout.setContentsMargins(0, 10, 0, 10)
+        self.content_layout.setSpacing(10)  # Reduced from 15
         self.content_layout.setAlignment(Qt.AlignTop)
         
         self.scroll_area.setWidget(self.content_widget)
         main_layout.addWidget(self.scroll_area)
-        
-    def _apply_toggle_styles(self):
-        """Apply gradient styles to toggle buttons."""
-        active_style = """
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #8b5cf6, stop:1 #6d28d9);
-                color: white;
-                border: 3px solid rgba(255, 255, 255, 0.6);
-                border-radius: 16px;
-                font-weight: bold;
-                font-size: 18px;
-                text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-            }
-        """
-        
-        inactive_style = """
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #e0e7ff, stop:1 #c7d2fe);
-                color: #4c1d95;
-                border: 2px solid #a5b4fc;
-                border-radius: 16px;
-                font-weight: bold;
-                font-size: 18px;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #c7d2fe, stop:1 #a5b4fc);
-                border: 2px solid #8b5cf6;
-            }
-        """
-        
-        if self.btn_lessons.isChecked():
-            self.btn_lessons.setStyleSheet(active_style)
-            self.btn_examples.setStyleSheet(inactive_style)
-        else:
-            self.btn_lessons.setStyleSheet(inactive_style)
-            self.btn_examples.setStyleSheet(active_style)
-    
-    def _apply_level_badge_styles(self):
-        """Apply styles to level filter badges."""
-        for level, badge in self.level_badges.items():
-            if badge.isChecked():
-                # Active badge style with rounded corners
-                badge.setStyleSheet("""
-                    QPushButton {
-                        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                            stop:0 #8b5cf6, stop:1 #6d28d9);
-                        color: white;
-                        border: 3px solid rgba(255, 255, 255, 0.9);
-                        border-radius: 16px;
-                        font-size: 28px;
-                    }
-                    QPushButton:hover {
-                        border: 3px solid white;
-                        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                            stop:0 #7c3aed, stop:1 #5b21b6);
-                    }
-                """)
-            else:
-                # Inactive badge style with rounded corners
-                badge.setStyleSheet("""
-                    QPushButton {
-                        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                            stop:0 #f8fafc, stop:1 #e2e8f0);
-                        color: #64748b;
-                        border: 2px solid #cbd5e1;
-                        border-radius: 16px;
-                        font-size: 28px;
-                    }
-                    QPushButton:hover {
-                        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                            stop:0 #e2e8f0, stop:1 #cbd5e1);
-                        border: 2px solid #8b5cf6;
-                    }
-                """)
     
     def filter_by_level(self, level):
         """Filter content by difficulty level."""
-        # Prevent redundant filters
         if self.current_level_filter == level:
             return
         
         self.current_level_filter = level
         
-        # Update badge states
-        for lvl, badge in self.level_badges.items():
-            badge.setChecked(lvl == level)
+        # Update timeline nodes
+        for lvl, node in self.timeline_nodes.items():
+            node.set_active(lvl == level)
         
-        self._apply_level_badge_styles()
-        
-        # Re-populate content with filter
+        # Re-populate content
         parent = self.parent()
-        while parent and not hasattr(parent, '_populate_tutorials_view'):
+        while parent and not hasattr(parent, '_populate_view_content'):
             parent = parent.parent()
         
-        if parent and hasattr(parent, '_populate_tutorials_view'):
-            parent._populate_tutorials_view()
-    
-    def switch_view(self, view_type):
-        """Switch between lessons and examples view."""
-        # Prevent redundant switches
-        if self.current_view == view_type:
-            return
-        
-        self.current_view = view_type
-        
-        # Update toggle button states
-        self.btn_lessons.setChecked(view_type == "lessons")
-        self.btn_examples.setChecked(view_type == "examples")
-        self._apply_toggle_styles()
-        
-        # Clear current content
-        self.clear_content()
-        
-        # Trigger parent to reload content
-        parent = self.parent()
-        while parent and not hasattr(parent, '_populate_tutorials_view'):
-            parent = parent.parent()
-        
-        if parent and hasattr(parent, '_populate_tutorials_view'):
-            parent._populate_tutorials_view()
+        if parent and hasattr(parent, '_populate_view_content'):
+            parent._populate_view_content(self)
     
     def clear_content(self):
         """Clear all content from the content area."""
@@ -297,9 +199,9 @@ class TutorialsView(QWidget):
                 item.widget().deleteLater()
     
     def show_empty_state(self, message=None):
-        """Show empty state message when no content matches filter."""
+        """Show empty state message."""
         if message is None:
-            if self.current_view == "lessons":
+            if self.view_type == "lessons":
                 message = "No lessons available for this level" if self.lang == "en" else "Chưa có bài học cho cấp độ này"
             else:
                 message = "No examples available for this level" if self.lang == "en" else "Chưa có ví dụ cho cấp độ này"
@@ -308,7 +210,7 @@ class TutorialsView(QWidget):
         empty_label.setAlignment(Qt.AlignCenter)
         empty_label.setStyleSheet("""
             QLabel {
-                color: #94a3b8;
+                color: #6B7280;
                 font-size: 16px;
                 font-style: italic;
                 padding: 60px 20px;
@@ -317,26 +219,15 @@ class TutorialsView(QWidget):
         """)
         self.content_layout.addWidget(empty_label)
     
-    def load_lessons(self):
-        """Load and display lessons."""
-        # This will be populated by MainWindow
-        pass
-    
-    def load_examples(self):
-        """Load and display examples."""
-        # This will be populated by MainWindow
-        pass
-    
     def add_lesson_card(self, lesson_data):
-        """Add a lesson card to the content area (respects level filter)."""
+        """Add a lesson card to the content area."""
         # Check if lesson matches current level filter
         lesson_level = lesson_data.get("level", "Beginner")
         if lesson_level != self.current_level_filter:
-            return  # Skip this lesson
+            return
         
         card = LessonCard(lesson_data, self.lang, self._is_small)
         
-        # Connect signal - emit lesson_started when Start is clicked
         def on_start():
             lesson_id = str(lesson_data.get('id', ''))
             step_num = int(1)
@@ -346,38 +237,183 @@ class TutorialsView(QWidget):
         self.content_layout.addWidget(card)
     
     def add_example_card(self, example_data):
-        """Add an example card to the content area (respects level filter)."""
+        """Add an example card to the content area."""
         # Check if example matches current level filter
         example_level = example_data.get("level", "Beginner")
         if example_level != self.current_level_filter:
-            return  # Skip this example
+            return
         
         card = ExampleCard(example_data, self.lang, self._is_small)
         card.load_clicked.connect(lambda: self.example_loaded.emit(
             example_data.get("file_path", "")
         ))
+        card.unlock_requested.connect(self._on_unlock_requested)
         self.content_layout.addWidget(card)
+    
+    def _on_unlock_requested(self, example_id, cost):
+        """Handle unlock request from example card."""
+        print(f"🔓 Unlock requested: {example_id}, cost: {cost} coins")
+        # Store for parent to handle
+        self._pending_unlock = (example_id, cost)
     
     def set_small_mode(self, is_small):
         """Update sizing for small screen mode."""
         self._is_small = is_small
+        # Update coins widget if exists
+        if hasattr(self, 'coins_widget') and self.coins_widget:
+            self.coins_widget.set_small_mode(is_small)
+    
+    def refresh_coins(self):
+        """Refresh coins display from progress manager."""
+        if hasattr(self, 'coins_widget') and self.coins_widget:
+            try:
+                from src.modules.progress_manager import get_progress_manager
+                from src.modules.developer_mode import get_developer_mode
+                
+                pm = get_progress_manager()
+                dev_mode = get_developer_mode()
+                
+                # Use developer coins if dev mode is enabled
+                if dev_mode.is_enabled():
+                    total_coins = dev_mode.get_coins()
+                    print(f"💰 Coins refreshed (DEV MODE): {total_coins} coins")
+                else:
+                    total_coins = pm.get_total_coins()
+                    print(f"💰 Coins refreshed: {total_coins} coins")
+                
+                self.coins_widget.set_coins(total_coins)
+            except Exception as e:
+                print(f"⚠️ Could not refresh coins: {e}")
+
+
+class HexagonBadge(QWidget):
+    """Custom hexagon badge with number inside."""
+    
+    def __init__(self, number, is_active=False):
+        super().__init__()
+        self.number = number
+        self.is_active = is_active
+        self.setFixedSize(50, 50)
         
-        # Update toggle buttons
-        btn_size = (160, 50) if is_small else (200, 60)
-        self.btn_lessons.setFixedSize(*btn_size)
-        self.btn_examples.setFixedSize(*btn_size)
+        # Color scheme matching the badge colors in lesson/example cards
+        self.colors = {
+            1: ("#10B981", "#059669"),  # Emerald Green (Beginner)
+            2: ("#EAB308", "#CA8A04"),  # Yellow (Intermediate)
+            3: ("#EF4444", "#DC2626"),  # Red (Advanced)
+        }
+    
+    def set_active(self, active):
+        """Update active state."""
+        self.is_active = active
+        self.update()
+    
+    def paintEvent(self, event):
+        """Draw hexagon with number."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
         
-        # Update toggle button font sizes
-        font_size = 15 if is_small else 18
-        for btn in [self.btn_lessons, self.btn_examples]:
-            font = btn.font()
-            font.setPointSize(font_size)
-            btn.setFont(font)
+        # Get colors based on level
+        fill_color, border_color = self.colors.get(self.number, ("#10B981", "#059669"))
         
-        # Update level badges (smaller size)
-        badge_size = 50 if is_small else 60
-        for badge in self.level_badges.values():
-            badge.setFixedSize(badge_size, badge_size)
+        # Create hexagon points
+        center_x, center_y = 25, 25
+        
+        # Simplified hexagon
+        hexagon = QPolygonF([
+            QPointF(center_x, center_y - 18),
+            QPointF(center_x + 16, center_y - 9),
+            QPointF(center_x + 16, center_y + 9),
+            QPointF(center_x, center_y + 18),
+            QPointF(center_x - 16, center_y + 9),
+            QPointF(center_x - 16, center_y - 9),
+        ])
+        
+        # Draw hexagon with appropriate colors
+        if self.is_active:
+            # Active state: bright vibrant colors
+            painter.setBrush(QColor(fill_color))
+            painter.setPen(QPen(QColor(fill_color), 3))
+        else:
+            # Inactive state: muted/darker colors
+            painter.setBrush(QColor(fill_color).darker(200))
+            painter.setPen(QPen(QColor(border_color).darker(150), 2))
+        
+        painter.drawPolygon(hexagon)
+        
+        # Draw number (always white for good contrast)
+        painter.setPen(QColor("#FFFFFF"))
+        font = painter.font()
+        font.setPointSize(16)
+        font.setBold(True)
+        painter.setFont(font)
+        # Offset rect slightly up and right to compensate for font rendering offset on Windows
+        from PyQt5.QtCore import QRect
+        text_rect = QRect(self.rect().x() + 1, self.rect().y() - 1,
+                          self.rect().width(), self.rect().height())
+        painter.drawText(text_rect, Qt.AlignCenter, str(self.number))
+
+
+class TimelineNode(QWidget):
+    """Timeline node widget for level filter."""
+    
+    clicked = pyqtSignal()
+    
+    def __init__(self, level_number, label, is_active=False):
+        super().__init__()
+        self.is_active = is_active
+        self.level_number = level_number
+        
+        self.setStyleSheet("QWidget { background: transparent; }")
+        self.setCursor(Qt.PointingHandCursor)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignCenter)
+        
+        # Hexagon badge
+        self.badge = HexagonBadge(level_number, is_active)
+        layout.addWidget(self.badge, alignment=Qt.AlignCenter)
+        
+        # Label
+        self.text_label = QLabel(label)
+        self.text_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.text_label)
+        
+        self._update_style()
+    
+    def set_active(self, active):
+        """Set active state."""
+        self.is_active = active
+        self.badge.set_active(active)
+        self._update_style()
+    
+    def _update_style(self):
+        """Update visual style based on active state."""
+        if self.is_active:
+            self.text_label.setStyleSheet("""
+                QLabel {
+                    color: #FFFFFF;
+                    font-size: 13px;
+                    font-weight: bold;
+                    background: transparent;
+                }
+            """)
+        else:
+            self.text_label.setStyleSheet("""
+                QLabel {
+                    color: #6B7280;
+                    font-size: 13px;
+                    font-weight: normal;
+                    background: transparent;
+                }
+            """)
+    
+    def mousePressEvent(self, event):
+        """Handle mouse click."""
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
 
 
 class LessonCard(QFrame):
@@ -393,95 +429,111 @@ class LessonCard(QFrame):
         self.is_active = lesson_data.get("is_active", False)
         
         self.setObjectName("lessonCard")
-        
-        # Card styling with gradient border
-        border_color = self._get_level_color(lesson_data.get("level", "Beginner"))
-        self.setStyleSheet(f"""
-            QFrame#lessonCard {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #ffffff, stop:1 #f8fafc);
-                border: 3px solid {border_color};
-                border-radius: 16px;
-                padding: 20px;
-            }}
+        self.setStyleSheet("""
+            QFrame#lessonCard {
+                background: #2A2A3C;
+                border: 1px solid #3F3F5A;
+                border-radius: 12px;
+                padding: 12px;
+            }
+            QFrame#lessonCard:hover {
+                border: 1px solid #8B5CF6;
+            }
         """)
         
         layout = QHBoxLayout(self)
-        layout.setSpacing(15)
+        layout.setSpacing(12)
         
-        # Icon
+        # Icon - smaller
         icon_label = QLabel(lesson_data.get("icon", "📚"))
         icon_label.setStyleSheet("font-size: 48px; background: transparent;")
-        icon_label.setFixedSize(70, 70)
+        icon_label.setFixedSize(48, 48)
         icon_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(icon_label)
         
         # Content (title + description)
         content_layout = QVBoxLayout()
-        content_layout.setSpacing(5)
+        content_layout.setSpacing(2)
         
         title = QLabel(lesson_data.get("title", "Lesson"))
-        title.setStyleSheet(f"""
-            font-size: {'16px' if is_small else '20px'};
+        title.setStyleSheet("""
+            font-size: 16px;
             font-weight: bold;
-            color: {border_color};
+            color: #FFFFFF;
             background: transparent;
         """)
         content_layout.addWidget(title)
         
         desc = QLabel(lesson_data.get("description", ""))
         desc.setWordWrap(True)
-        desc.setStyleSheet(f"""
-            font-size: {'11px' if is_small else '14px'};
-            color: #64748b;
+        desc.setStyleSheet("""
+            font-size: 12px;
+            color: #A1A1AA;
             background: transparent;
         """)
         content_layout.addWidget(desc)
         
         layout.addLayout(content_layout, 1)
         
-        # Buttons (Level badge + Start/Stop)
+        # Right side buttons
         buttons_layout = QVBoxLayout()
-        buttons_layout.setSpacing(10)
+        buttons_layout.setSpacing(6)
         buttons_layout.setAlignment(Qt.AlignCenter)
         
-        # Level badge
-        level_badge = QLabel(lesson_data.get("level", "Beginner"))
+        # Level badge with dynamic colors
+        level_text = lesson_data.get("level", "Beginner")
+        if lang == "vi":
+            level_map = {"Beginner": "Cơ bản", "Intermediate": "Trung cấp", "Advanced": "Nâng cao"}
+            display_text = level_map.get(level_text, level_text)
+        else:
+            display_text = level_text
+        
+        # Dynamic badge color based on level
+        badge_colors = {
+            "Beginner": "#10B981",      # Emerald Green
+            "Intermediate": "#EAB308",  # Yellow
+            "Advanced": "#EF4444"       # Red
+        }
+        badge_color = badge_colors.get(level_text, "#10B981")
+        
+        level_badge = QLabel(display_text)
         level_badge.setAlignment(Qt.AlignCenter)
         level_badge.setStyleSheet(f"""
-            background: {border_color};
-            color: white;
-            border-radius: 12px;
-            padding: 6px 20px;
+            background: {badge_color};
+            color: #FFFFFF;
+            border-radius: 8px;
+            padding: 3px 10px;
             font-weight: bold;
-            font-size: {'11px' if is_small else '13px'};
+            font-size: 11px;
         """)
         buttons_layout.addWidget(level_badge)
         
-        # Start/Stop button
+        # Start/Stop button - smaller
         if self.is_active:
             self.action_btn = QPushButton("⏹ Stop")
             self.action_btn.clicked.connect(lambda: self._on_stop_clicked())
-            btn_gradient = "stop:0 #ef4444, stop:1 #dc2626"
         else:
-            self.action_btn = QPushButton("▶ Start")
+            start_text = "▶ Start" if lang == "en" else "▶ Bắt đầu"
+            self.action_btn = QPushButton(start_text)
             self.action_btn.clicked.connect(lambda: self._on_start_clicked())
-            btn_gradient = "stop:0 #8b5cf6, stop:1 #6d28d9"
         
-        self.action_btn.setFixedSize(140 if is_small else 160, 40 if is_small else 45)
+        self.action_btn.setFixedSize(100, 32)
         self.action_btn.setCursor(Qt.PointingHandCursor)
-        self.action_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, {btn_gradient});
-                color: white;
-                border-radius: {'10px' if is_small else '12px'};
+        self.action_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #8B5CF6, stop:1 #6366F1);
+                color: #FFFFFF;
+                border: none;
+                border-radius: 10px;
                 font-weight: bold;
-                font-size: {'13px' if is_small else '15px'};
-                border: 2px solid rgba(255, 255, 255, 0.3);
-            }}
-            QPushButton:hover {{
-                border: 2px solid rgba(255, 255, 255, 0.6);
-            }}
+                font-size: 13px;
+                padding: 8px 16px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #9F7AEA, stop:1 #7C3AED);
+            }
         """)
         buttons_layout.addWidget(self.action_btn)
         
@@ -494,111 +546,205 @@ class LessonCard(QFrame):
     def _on_stop_clicked(self):
         """Handle stop button click."""
         self.stop_clicked.emit()
-    
-    def _get_level_color(self, level):
-        """Get color based on difficulty level."""
-        colors = {
-            "Beginner": "#22c55e",
-            "Intermediate": "#f59e0b",
-            "Advanced": "#ef4444"
-        }
-        return colors.get(level, "#8b5cf6")
 
 
 class ExampleCard(QFrame):
     """Individual example card widget."""
     
     load_clicked = pyqtSignal()
+    unlock_requested = pyqtSignal(str, int)  # example_id, cost
     
     def __init__(self, example_data, lang="en", is_small=False):
         super().__init__()
         self.example_data = example_data
         self.lang = lang
+        self.is_locked = not example_data.get("is_unlocked", False)
+        self.example_id = example_data.get("id", "")
+        self.cost = example_data.get("cost", 5)
         
         self.setObjectName("exampleCard")
         
-        # Card styling with green gradient border
-        self.setStyleSheet("""
-            QFrame#exampleCard {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #ffffff, stop:1 #f0fdf4);
-                border: 3px solid #22c55e;
-                border-radius: 16px;
-                padding: 20px;
-            }
-        """)
+        # Different styling for locked vs unlocked
+        if self.is_locked:
+            self.setStyleSheet("""
+                QFrame#exampleCard {
+                    background: #1F1F2E;
+                    border: 2px dashed #3F3F5A;
+                    border-radius: 12px;
+                    padding: 12px;
+                }
+                QFrame#exampleCard:hover {
+                    border: 2px dashed #6366F1;
+                    background: #252535;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                QFrame#exampleCard {
+                    background: #2A2A3C;
+                    border: 1px solid #3F3F5A;
+                    border-radius: 12px;
+                    padding: 12px;
+                }
+                QFrame#exampleCard:hover {
+                    border: 1px solid #8B5CF6;
+                }
+            """)
         
         layout = QHBoxLayout(self)
-        layout.setSpacing(15)
+        layout.setSpacing(12)
         
-        # Icon
-        icon_label = QLabel(example_data.get("icon", "🎯"))
-        icon_label.setStyleSheet("font-size: 48px; background: transparent;")
-        icon_label.setFixedSize(70, 70)
+        # Icon - with lock overlay if locked
+        icon_container = QWidget()
+        icon_container.setFixedSize(48, 48)
+        icon_container.setStyleSheet("background: transparent;")
+        icon_layout = QVBoxLayout(icon_container)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon_layout.setAlignment(Qt.AlignCenter)
+        
+        if self.is_locked:
+            icon_label = QLabel("🔒")
+            icon_label.setStyleSheet("font-size: 36px; background: transparent; color: #6B7280;")
+        else:
+            icon_label = QLabel(example_data.get("icon", "🎯"))
+            icon_label.setStyleSheet("font-size: 48px; background: transparent;")
+        
         icon_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(icon_label)
+        icon_layout.addWidget(icon_label)
+        layout.addWidget(icon_container)
         
         # Content
         content_layout = QVBoxLayout()
-        content_layout.setSpacing(5)
+        content_layout.setSpacing(2)
         
         title = QLabel(example_data.get("title", "Example"))
-        title.setStyleSheet(f"""
-            font-size: {'16px' if is_small else '20px'};
-            font-weight: bold;
-            color: #16a34a;
-            background: transparent;
-        """)
+        if self.is_locked:
+            title.setStyleSheet("""
+                font-size: 16px;
+                font-weight: bold;
+                color: #6B7280;
+                background: transparent;
+            """)
+        else:
+            title.setStyleSheet("""
+                font-size: 16px;
+                font-weight: bold;
+                color: #FFFFFF;
+                background: transparent;
+            """)
         content_layout.addWidget(title)
         
         desc = QLabel(example_data.get("description", ""))
         desc.setWordWrap(True)
-        desc.setStyleSheet(f"""
-            font-size: {'11px' if is_small else '14px'};
-            color: #64748b;
-            background: transparent;
-        """)
+        if self.is_locked:
+            desc.setStyleSheet("""
+                font-size: 12px;
+                color: #4B5563;
+                background: transparent;
+            """)
+        else:
+            desc.setStyleSheet("""
+                font-size: 12px;
+                color: #A1A1AA;
+                background: transparent;
+            """)
         content_layout.addWidget(desc)
         
         layout.addLayout(content_layout, 1)
         
-        # Buttons
+        # Right side buttons
         buttons_layout = QVBoxLayout()
-        buttons_layout.setSpacing(10)
+        buttons_layout.setSpacing(6)
         buttons_layout.setAlignment(Qt.AlignCenter)
         
-        # Level badge
-        level_badge = QLabel(example_data.get("level", "Beginner"))
+        # Level badge with dynamic colors
+        level_text = example_data.get("level", "Beginner")
+        if lang == "vi":
+            level_map = {"Beginner": "Cơ bản", "Intermediate": "Trung cấp", "Advanced": "Nâng cao"}
+            display_text = level_map.get(level_text, level_text)
+        else:
+            display_text = level_text
+        
+        # Dynamic badge color based on level
+        badge_colors = {
+            "Beginner": "#10B981",      # Emerald Green
+            "Intermediate": "#EAB308",  # Yellow
+            "Advanced": "#EF4444"       # Red
+        }
+        badge_color = badge_colors.get(level_text, "#10B981")
+        
+        level_badge = QLabel(display_text)
         level_badge.setAlignment(Qt.AlignCenter)
-        level_badge.setStyleSheet(f"""
-            background: #22c55e;
-            color: white;
-            border-radius: 12px;
-            padding: 6px 20px;
-            font-weight: bold;
-            font-size: {'11px' if is_small else '13px'};
-        """)
+        if self.is_locked:
+            level_badge.setStyleSheet(f"""
+                background: #374151;
+                color: #9CA3AF;
+                border-radius: 8px;
+                padding: 3px 10px;
+                font-weight: bold;
+                font-size: 11px;
+            """)
+        else:
+            level_badge.setStyleSheet(f"""
+                background: {badge_color};
+                color: #FFFFFF;
+                border-radius: 8px;
+                padding: 3px 10px;
+                font-weight: bold;
+                font-size: 11px;
+            """)
         buttons_layout.addWidget(level_badge)
         
-        # Load button
-        load_btn = QPushButton("📂 Load")
-        load_btn.setFixedSize(140 if is_small else 160, 40 if is_small else 45)
-        load_btn.setCursor(Qt.PointingHandCursor)
-        load_btn.clicked.connect(self.load_clicked.emit)
-        load_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #8b5cf6, stop:1 #6d28d9);
-                color: white;
-                border-radius: {'10px' if is_small else '12px'};
-                font-weight: bold;
-                font-size: {'13px' if is_small else '15px'};
-                border: 2px solid rgba(255, 255, 255, 0.3);
-            }}
-            QPushButton:hover {{
-                border: 2px solid rgba(255, 255, 255, 0.6);
-            }}
-        """)
-        buttons_layout.addWidget(load_btn)
+        # Load/Unlock button
+        if self.is_locked:
+            # Show unlock button with cost
+            unlock_text = f"🔓 {self.cost} 🪙" if lang == "en" else f"🔓 {self.cost} 🪙"
+            self.action_btn = QPushButton(unlock_text)
+            self.action_btn.clicked.connect(self._on_unlock_clicked)
+            self.action_btn.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                        stop:0 #F59E0B, stop:1 #D97706);
+                    color: #FFFFFF;
+                    border: none;
+                    border-radius: 10px;
+                    font-weight: bold;
+                    font-size: 13px;
+                    padding: 8px 16px;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                        stop:0 #FBBF24, stop:1 #F59E0B);
+                }
+            """)
+        else:
+            # Show load button
+            load_text = "📂 Load" if lang == "en" else "📂 Tải"
+            self.action_btn = QPushButton(load_text)
+            self.action_btn.clicked.connect(self.load_clicked.emit)
+            self.action_btn.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                        stop:0 #8B5CF6, stop:1 #6366F1);
+                    color: #FFFFFF;
+                    border: none;
+                    border-radius: 10px;
+                    font-weight: bold;
+                    font-size: 13px;
+                    padding: 8px 16px;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                        stop:0 #9F7AEA, stop:1 #7C3AED);
+                }
+            """)
+        
+        self.action_btn.setFixedSize(100, 32)
+        self.action_btn.setCursor(Qt.PointingHandCursor)
+        buttons_layout.addWidget(self.action_btn)
         
         layout.addLayout(buttons_layout)
+    
+    def _on_unlock_clicked(self):
+        """Handle unlock button click."""
+        self.unlock_requested.emit(self.example_id, self.cost)

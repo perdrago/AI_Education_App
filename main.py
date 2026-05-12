@@ -52,6 +52,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
 from src.modules.training_components import MultiClassTagPanel
+from src.modules.progress_manager import get_progress_manager
 import numpy as np
 
 # ────────────────────────────────────────────────────────────
@@ -677,14 +678,18 @@ class LessonProgressBar(QWidget):
 # ────────────────────────────────────────────────────────────
 
 class StepProgressBar(QWidget):
-    """Compact progress bar showing steps and hearts for current lesson."""
+    """Compact progress bar showing steps and stars/HP for current lesson."""
     
     def __init__(self, parent=None, lang="en"):
         super().__init__(parent)
         self.current_step = 1
         self.total_steps = 5  # Will be updated based on lesson
-        self.hearts = 0
-        self.max_hearts = 5  # Will be updated based on lesson
+        self.hearts = 0  # Keep for backward compatibility
+        self.max_hearts = 5  # Keep for backward compatibility
+        self.stars = 0  # New: stars earned in steps
+        self.hp = 5  # New: HP for challenge
+        self.max_hp = 5
+        self.is_challenge_mode = False  # New: track if in challenge
         self.lang = lang
         self.lesson_id = None
         self.step_status = {}  # Track step completion: {step_num: 'correct'/'incorrect'/None}
@@ -838,20 +843,14 @@ class StepProgressBar(QWidget):
         
         main_layout.addStretch()
         
-        # Hearts display
+        # Stars/HP display - Import and use new widget
+        from src.modules.stars_coins_widget import StarsCoinsWidget
+        self.stars_coins_widget = StarsCoinsWidget(mode="stars", lang=lang)
+        main_layout.addWidget(self.stars_coins_widget)
+        
+        # Keep old hearts_label for backward compatibility (hidden)
         self.hearts_label = QLabel()
-        self.hearts_label.setFixedHeight(36)
-        self.hearts_label.setAlignment(Qt.AlignCenter)
-        self.hearts_label.setStyleSheet("""
-            font-size: 18px;
-            font-weight: bold;
-            color: #dc2626;
-            padding: 0px 16px;
-            background: rgba(220, 38, 38, 0.1);
-            border-radius: 8px;
-            border: 2px solid rgba(220, 38, 38, 0.3);
-        """)
-        main_layout.addWidget(self.hearts_label)
+        self.hearts_label.setVisible(False)
         
         self.update_display()
         
@@ -863,6 +862,10 @@ class StepProgressBar(QWidget):
     def set_small_mode(self, is_small):
         """Update sizing and scaling for smaller screen constraints."""
         self._is_small = is_small
+        
+        # Update stars/coins widget
+        if hasattr(self, 'stars_coins_widget'):
+            self.stars_coins_widget.set_small_mode(is_small)
         
         # Shrink layout spacing dynamically
         if hasattr(self, 'steps_container'):
@@ -989,18 +992,24 @@ class StepProgressBar(QWidget):
             }}
         """)
         
+        # Update stars/coins widget sizing
+        if hasattr(self, 'stars_coins_widget'):
+            self.stars_coins_widget.set_small_mode(is_small)
+        
+        # Old hearts_label (kept hidden for compatibility)
         _hearts_fs = 13 if is_small else 18
         _hearts_pad = 6 if is_small else 10
-        self.hearts_label.setFixedHeight(_btn_h)
-        self.hearts_label.setStyleSheet(f"""
-            font-size: {_hearts_fs}px;
-            font-weight: bold;
-            color: #dc2626;
-            padding: 0px {_hearts_pad}px;
-            background: rgba(220, 38, 38, 0.1);
-            border-radius: 6px;
-            border: 1.5px solid rgba(220, 38, 38, 0.3);
-        """)
+        if hasattr(self, 'hearts_label'):
+            self.hearts_label.setFixedHeight(_btn_h)
+            self.hearts_label.setStyleSheet(f"""
+                font-size: {_hearts_fs}px;
+                font-weight: bold;
+                color: #dc2626;
+                padding: 0px {_hearts_pad}px;
+                background: rgba(220, 38, 38, 0.1);
+                border-radius: 6px;
+                border: 1.5px solid rgba(220, 38, 38, 0.3);
+            """)
         self.update_display()
     
     def set_lesson(self, lesson_id, total_steps):
@@ -1010,7 +1019,15 @@ class StepProgressBar(QWidget):
         self.max_hearts = total_steps
         self.current_step = 1
         self.hearts = 0
+        self.stars = 0  # Reset stars
+        self.hp = 5  # Reset HP
+        self.is_challenge_mode = False  # Start in step mode
         self.step_status = {}  # Reset step status
+        
+        # Update stars/coins widget to stars mode
+        if hasattr(self, 'stars_coins_widget'):
+            self.stars_coins_widget.set_mode("stars")
+            self.stars_coins_widget.set_stars(0)
         
         # Clear old indicators
         for indicator in self.step_indicators:
@@ -1133,17 +1150,38 @@ class StepProgressBar(QWidget):
                     border: 2px solid #f87171;
                 """)
             elif self.current_step == self.total_steps:
-                # Challenge unlocked
-                challenge.setStyleSheet(f"""
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                        stop:0 #f59e0b, stop:1 #d97706);
-                    color: white;
-                    border-radius: {ind_rad}px;
-                    font-size: {ind_fs}px;
-                    font-weight: bold;
-                """)
+                # Check if challenge is actually unlocked
+                challenge_unlocked = False
+                if self.lesson_id and hasattr(self, '_parent_window'):
+                    try:
+                        pm = self._parent_window.progress_manager
+                        challenge_unlocked = pm.is_challenge_unlocked(self.lesson_id)
+                    except:
+                        challenge_unlocked = False
+                
+                if challenge_unlocked:
+                    # Challenge unlocked - ready to start
+                    challenge.setStyleSheet(f"""
+                        background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                            stop:0 #10b981, stop:1 #059669);
+                        color: white;
+                        border-radius: {ind_rad}px;
+                        font-size: {ind_fs}px;
+                        font-weight: bold;
+                        border: 2px solid #34d399;
+                    """)
+                else:
+                    # Challenge still locked
+                    challenge.setStyleSheet(f"""
+                        background: #fee2e2;
+                        color: #991b1b;
+                        border-radius: {ind_rad}px;
+                        font-size: {ind_fs}px;
+                        font-weight: bold;
+                        border: 2px dashed #fca5a5;
+                    """)
             else:
-                # Challenge locked
+                # Challenge locked (not at last step yet)
                 challenge.setStyleSheet(f"""
                     background: #fef3c7;
                     color: #d97706;
@@ -1152,16 +1190,51 @@ class StepProgressBar(QWidget):
                     font-weight: bold;
                 """)
         
-        # Update hearts
-        self.hearts_label.setText(f"❤️ {self.hearts}/{self.max_hearts}")
+        # Update hearts (backward compatibility)
+        if hasattr(self, 'hearts_label'):
+            self.hearts_label.setText(f"❤️ {self.hearts}/{self.max_hearts}")
+        
+        # Update stars/coins widget
+        if hasattr(self, 'stars_coins_widget'):
+            if self.is_challenge_mode:
+                self.stars_coins_widget.set_hp(self.hp, self.max_hp)
+            else:
+                self.stars_coins_widget.set_stars(self.stars)
     
     def add_heart(self):
-        """Add one heart."""
+        """Add one heart (backward compatibility)."""
         if self.hearts < self.max_hearts:
             self.hearts += 1
             self.update_display()
             return True
         return False
+    
+    def add_stars(self, amount):
+        """Add stars (new method for step completion)."""
+        self.stars += amount
+        if hasattr(self, 'stars_coins_widget'):
+            self.stars_coins_widget.set_stars(self.stars)
+        print(f"⭐ Added {amount} stars. Total: {self.stars}")
+        return self.stars
+    
+    def switch_to_challenge_mode(self, hp=5):
+        """Switch from stars mode to HP mode for challenge."""
+        self.is_challenge_mode = True
+        self.hp = hp
+        self.max_hp = hp
+        if hasattr(self, 'stars_coins_widget'):
+            self.stars_coins_widget.set_mode("hp")
+            self.stars_coins_widget.set_hp(self.hp, self.max_hp)
+        print(f"🎯 Switched to challenge mode. HP: {self.hp}/{self.max_hp}")
+    
+    def decrease_hp(self):
+        """Decrease HP by 1 (for challenge mode)."""
+        if self.hp > 0:
+            self.hp -= 1
+            if hasattr(self, 'stars_coins_widget'):
+                self.stars_coins_widget.set_hp(self.hp, self.max_hp)
+            print(f"💔 HP decreased. Remaining: {self.hp}/{self.max_hp}")
+        return self.hp
     
     def mark_step_status(self, step_num, is_correct):
         """Mark a step as correct or incorrect.
@@ -1183,6 +1256,12 @@ class StepProgressBar(QWidget):
         """Reset to initial state."""
         self.current_step = 1
         self.hearts = 0
+        self.stars = 0
+        self.hp = 5
+        self.is_challenge_mode = False
+        if hasattr(self, 'stars_coins_widget'):
+            self.stars_coins_widget.set_mode("stars")
+            self.stars_coins_widget.set_stars(0)
         self.update_display()
     
     def hide_bar(self):
@@ -1476,6 +1555,15 @@ class AICodingLab(QMainWindow):
         self.is_small_screen = True
         self.current_open_file = None
         
+        # Initialize Progress Manager
+        self.progress_manager = get_progress_manager()
+        print("✅ Progress Manager initialized")
+        
+        # Initialize Developer Mode
+        from src.modules.developer_mode import get_developer_mode
+        self.developer_mode = get_developer_mode()
+        print("✅ Developer Mode initialized")
+        
         # Gamification state
         self.current_lesson_number = 1
         self.lesson_hearts = 0
@@ -1631,6 +1719,33 @@ class AICodingLab(QMainWindow):
                 # Fallback: add at the end
                 layout.addWidget(self.btnHint)
                 layout.addWidget(self.btnSolution)
+        
+        # Create Mode Toggle Button (Creative Mode ⇄ Unlock Mode)
+        self.btnModeToggle = QPushButton()
+        self.btnModeToggle.clicked.connect(self._toggle_mode)
+        self.btnModeToggle.setCursor(Qt.PointingHandCursor)
+        self.current_mode = "creative"  # Start in creative mode
+        _mode_h = 30 if self.is_small_screen else 40
+        _mode_fs = 10 if self.is_small_screen else 14
+        self.btnModeToggle.setFixedHeight(_mode_h)
+        self._update_mode_toggle_button()
+        
+        # Add Mode Toggle button to editorHeader (at the end, before stretch)
+        if editorHeader and editorHeader.layout():
+            layout = editorHeader.layout()
+            # Find stretch item and insert before it
+            stretch_index = -1
+            for i in range(layout.count()):
+                item = layout.itemAt(i)
+                if item and item.spacerItem():
+                    stretch_index = i
+                    break
+            
+            if stretch_index >= 0:
+                layout.insertWidget(stretch_index, self.btnModeToggle)
+            else:
+                layout.addWidget(self.btnModeToggle)
+        
         if self.tabPlus: self.tabPlus.clicked.connect(self.create_new_tab)
 
         self.btnSaveFile = self.running_mode_widget.findChild(QPushButton, "btnSaveFile")
@@ -1756,18 +1871,41 @@ class AICodingLab(QMainWindow):
         
         # TUTORIALS VIEW SETUP (replaces Code Editor when clicked)
         from src.modules.tutorials_view import TutorialsView
-        self._tutorials_view = TutorialsView(lang=self.current_lang)
+        from src.modules.welcome_screen import WelcomeScreen
+        from src.modules.function_lock_manager import FunctionLockManager
         
-        # Connect signals
-        self._tutorials_view.lesson_started.connect(self._on_tutorial_lesson_started)
-        self._tutorials_view.example_loaded.connect(self._on_tutorial_example_loaded)
-        self._tutorials_view.set_small_mode(self.is_small_screen)
+        # Initialize Function Lock Manager
+        self.function_lock_manager = FunctionLockManager()
+        
+        # Initialize Tutorials View (for Examples only)
+        self._examples_view = TutorialsView(lang=self.current_lang, view_type="examples")
+        self._examples_view.example_loaded.connect(self._on_tutorial_example_loaded)
+        self._examples_view.set_small_mode(self.is_small_screen)
+        
+        # Override unlock handler
+        self._examples_view._on_unlock_requested = self._on_example_unlock_requested
+        
+        # Initialize Lessons View (for Unlock Mode)
+        self._lessons_view = TutorialsView(lang=self.current_lang, view_type="lessons")
+        self._lessons_view.lesson_started.connect(self._on_tutorial_lesson_started)
+        self._lessons_view.set_small_mode(self.is_small_screen)
+        
+        # Initialize Welcome Screen
+        self._welcome_screen = WelcomeScreen(lang=self.current_lang)
+        self._welcome_screen.creative_mode_selected.connect(self._on_creative_mode_selected)
+        self._welcome_screen.unlock_mode_selected.connect(self._on_unlock_mode_selected)
+        
+        # Show Welcome Screen on first launch (in Running Mode)
+        self._show_welcome_screen_on_startup()
         
         # Connect Tutorials button in header
         self.btnTutorials = self.findChild(QPushButton, "btnTutorials")
         if self.btnTutorials:
             self.btnTutorials.clicked.connect(self.toggle_tutorials_view)
             self._tutorials_view_open = False  # Track state
+        
+        # Add Developer Mode button to header
+        self._setup_developer_button()
 
         # C) CONSOLE TERMINAL SETUP
         self.consoleContainer = self.running_mode_widget.findChild(QWidget, "consoleContainer")
@@ -1866,6 +2004,7 @@ class AICodingLab(QMainWindow):
         
         # E) STEP PROGRESS BAR (Between Editor and Console)
         self._step_progress_bar = StepProgressBar(lang=self.current_lang)
+        self._step_progress_bar._parent_window = self  # Add reference to parent for progress_manager access
         self._step_progress_bar.setVisible(False)  # Hidden until a lesson starts
         # Connect navigation buttons
         self._step_progress_bar.btn_prev.clicked.connect(self.previous_step)
@@ -1926,7 +2065,14 @@ class AICodingLab(QMainWindow):
 
         # F) POPULATE FUNCTIONS
         try:
-            populate_functions_tab(self.running_mode_widget, is_small=self.is_small_screen, lang=self.current_lang)
+            # Get unlocked functions from lock manager
+            unlocked_funcs = self.function_lock_manager.get_unlocked_functions() if hasattr(self, 'function_lock_manager') else None
+            populate_functions_tab(
+                self.running_mode_widget, 
+                is_small=self.is_small_screen, 
+                lang=self.current_lang,
+                unlocked_functions=unlocked_funcs
+            )
         except Exception as e:
             print(f"Error populating functions tab: {e}")
 
@@ -2619,7 +2765,13 @@ class AICodingLab(QMainWindow):
         # Refresh function library with new language
         try:
             from src.modules.function_library import populate_functions_tab
-            populate_functions_tab(self.running_mode_widget, is_small=self.is_small_screen, lang=self.current_lang)
+            unlocked_funcs = self.function_lock_manager.get_unlocked_functions() if hasattr(self, 'function_lock_manager') else None
+            populate_functions_tab(
+                self.running_mode_widget, 
+                is_small=self.is_small_screen, 
+                lang=self.current_lang,
+                unlocked_functions=unlocked_funcs
+            )
         except Exception:
             pass
 
@@ -3343,7 +3495,13 @@ class AICodingLab(QMainWindow):
 
             # Refresh Function Library with scaling
             from src.modules.function_library import populate_functions_tab
-            populate_functions_tab(self.running_mode_widget, is_small=is_small, lang=self.current_lang)
+            unlocked_funcs = self.function_lock_manager.get_unlocked_functions() if hasattr(self, 'function_lock_manager') else None
+            populate_functions_tab(
+                self.running_mode_widget, 
+                is_small=is_small, 
+                lang=self.current_lang,
+                unlocked_functions=unlocked_funcs
+            )
 
             # Workspace Dashboard Scaling
             if hasattr(self, 'cardCode') and self.cardCode:
@@ -3691,22 +3849,26 @@ class AICodingLab(QMainWindow):
         self.mainStack.setCurrentIndex(1)
     
     def show_tutorials_view(self):
-        """Show Tutorials View (replaces Code Editor)."""
-        # Populate tutorials view with lessons and examples
-        self._populate_tutorials_view()
+        """Show Examples View (Tutorials button - only Examples)."""
+        # Populate examples view
+        self._populate_view_content(self._examples_view)
         
-        # Replace editor stack with tutorials view
-        if hasattr(self, 'editorStack') and hasattr(self, '_tutorials_view'):
+        # Refresh coins display
+        if hasattr(self, '_examples_view') and hasattr(self._examples_view, 'refresh_coins'):
+            self._examples_view.refresh_coins()
+        
+        # Replace editor stack with examples view
+        if hasattr(self, 'editorStack') and hasattr(self, '_examples_view'):
             # Store current editor widget
             if not hasattr(self, '_editor_widget_backup'):
                 self._editor_widget_backup = self.editorStack.currentWidget()
             
-            # Add tutorials view to editor stack if not already added
-            if self.editorStack.indexOf(self._tutorials_view) == -1:
-                self.editorStack.addWidget(self._tutorials_view)
+            # Add examples view to editor stack if not already added
+            if self.editorStack.indexOf(self._examples_view) == -1:
+                self.editorStack.addWidget(self._examples_view)
             
-            # Switch to tutorials view
-            self.editorStack.setCurrentWidget(self._tutorials_view)
+            # Switch to examples view
+            self.editorStack.setCurrentWidget(self._examples_view)
             
             # Hide lesson-specific UI elements
             if hasattr(self, '_step_progress_bar'):
@@ -3724,15 +3886,54 @@ class AICodingLab(QMainWindow):
             if hasattr(self, 'btnSaveFile'):
                 self.btnSaveFile.setVisible(False)
             
-            # Change editor title to "Tutorials"
+            # Change editor title to "Examples"
             if hasattr(self, 'editorTitle'):
-                s = STRINGS[self.current_lang]
-                tutorials_title = "📚 Tutorials" if self.current_lang == "en" else "📚 Hướng dẫn"
-                self.editorTitle.setText(tutorials_title)
+                examples_title = "📚 Examples" if self.current_lang == "en" else "📚 Ví dụ"
+                self.editorTitle.setText(examples_title)
             
-            # Update button to "Close Tutorials" with red color
-            self._update_tutorials_button(is_open=True)
+            # NOTE: Tutorials button does NOT change to "Close" anymore
             self._tutorials_view_open = True
+    
+    def show_lessons_view(self):
+        """Show Lessons View (Unlock Mode - only Lessons)."""
+        # Populate lessons view
+        self._populate_view_content(self._lessons_view)
+        
+        # Replace editor stack with lessons view
+        if hasattr(self, 'editorStack') and hasattr(self, '_lessons_view'):
+            # Store current editor widget
+            if not hasattr(self, '_editor_widget_backup'):
+                self._editor_widget_backup = self.editorStack.currentWidget()
+            
+            # Add lessons view to editor stack if not already added
+            if self.editorStack.indexOf(self._lessons_view) == -1:
+                self.editorStack.addWidget(self._lessons_view)
+            
+            # Switch to lessons view
+            self.editorStack.setCurrentWidget(self._lessons_view)
+            
+            # Hide lesson-specific UI elements (will show when lesson starts)
+            if hasattr(self, '_step_progress_bar'):
+                self._step_progress_bar.setVisible(False)
+            if hasattr(self, '_requirements_panel'):
+                self._requirements_panel.setVisible(False)
+            if hasattr(self, 'btnHint'):
+                self.btnHint.setVisible(False)
+            if hasattr(self, 'btnSolution'):
+                self.btnSolution.setVisible(False)
+            
+            # Hide Run and Save buttons
+            if hasattr(self, 'btnRunCode'):
+                self.btnRunCode.setVisible(False)
+            if hasattr(self, 'btnSaveFile'):
+                self.btnSaveFile.setVisible(False)
+            
+            # Change editor title to "Lessons"
+            if hasattr(self, 'editorTitle'):
+                lessons_title = "📚 Lessons" if self.current_lang == "en" else "📚 Bài học"
+                self.editorTitle.setText(lessons_title)
+            
+            self._lessons_view_open = True
     
     def toggle_tutorials_view(self):
         """Toggle Tutorials View on/off."""
@@ -3816,6 +4017,226 @@ class AICodingLab(QMainWindow):
             self._update_tutorials_button(is_open=False)
             self._tutorials_view_open = False
     
+    def hide_examples_view(self):
+        """Hide Examples View and restore Code Editor."""
+        if hasattr(self, 'editorStack') and hasattr(self, '_editor_widget_backup'):
+            # Switch back to editor
+            self.editorStack.setCurrentWidget(self._editor_widget_backup)
+            
+            # Restore Run and Save buttons
+            if hasattr(self, 'btnRunCode'):
+                self.btnRunCode.setVisible(True)
+            if hasattr(self, 'btnSaveFile'):
+                self.btnSaveFile.setVisible(True)
+            
+            # Restore editor title
+            if hasattr(self, 'editorTitle'):
+                s = STRINGS[self.current_lang]
+                self.editorTitle.setText(s.get("EDITOR_TITLE", ">_ Code Editor"))
+            
+            self._tutorials_view_open = False
+    
+    def hide_lessons_view(self):
+        """Hide Lessons View and restore Code Editor."""
+        if hasattr(self, 'editorStack') and hasattr(self, '_editor_widget_backup'):
+            # Switch back to editor
+            self.editorStack.setCurrentWidget(self._editor_widget_backup)
+            
+            # Restore Run and Save buttons
+            if hasattr(self, 'btnRunCode'):
+                self.btnRunCode.setVisible(True)
+            if hasattr(self, 'btnSaveFile'):
+                self.btnSaveFile.setVisible(True)
+            
+            # Restore editor title
+            if hasattr(self, 'editorTitle'):
+                s = STRINGS[self.current_lang]
+                self.editorTitle.setText(s.get("EDITOR_TITLE", ">_ Code Editor"))
+            
+            self._lessons_view_open = False
+    
+    # ═══════════════════════════════════════════════════════════
+    # DEVELOPER MODE
+    # ═══════════════════════════════════════════════════════════
+    
+    def _setup_developer_button(self):
+        """Setup Developer Mode button in header."""
+        # Find header frame
+        self.headerFrame = self.findChild(QFrame, "headerFrame")
+        if not self.headerFrame:
+            print("⚠️ headerFrame not found, cannot add Developer button")
+            return
+        
+        # Get header layout
+        header_layout = self.headerFrame.layout()
+        if not header_layout:
+            print("⚠️ headerFrame has no layout, cannot add Developer button")
+            return
+        
+        # Create Developer button
+        self.btnDeveloper = QPushButton("👨‍💻 Dev")
+        self.btnDeveloper.setFixedSize(80, 32)
+        self.btnDeveloper.setCursor(Qt.PointingHandCursor)
+        self.btnDeveloper.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #f59e0b, stop:1 #d97706);
+                color: white;
+                border: 2px solid rgba(255, 255, 255, 0.3);
+                border-radius: 8px;
+                padding: 4px 8px;
+                font-weight: bold;
+                font-size: 12px;
+                text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #d97706, stop:1 #b45309);
+                border: 2px solid rgba(255, 255, 255, 0.5);
+            }
+        """)
+        self.btnDeveloper.clicked.connect(self._toggle_developer_mode)
+        
+        # Insert before the last item (usually a stretch or language buttons)
+        # Find a good position - after logo/title, before language buttons
+        insert_pos = header_layout.count() - 3  # Before language buttons
+        if insert_pos < 0:
+            insert_pos = 0
+        
+        header_layout.insertWidget(insert_pos, self.btnDeveloper)
+        print("✅ Developer button added to header")
+    
+    def _toggle_developer_mode(self):
+        """Toggle Developer Mode on/off."""
+        if self.developer_mode.is_enabled():
+            # Disable developer mode
+            self._disable_developer_mode()
+        else:
+            # Show password dialog
+            self._show_developer_login()
+    
+    def _show_developer_login(self):
+        """Show developer mode login dialog."""
+        from src.modules.developer_mode import DeveloperModeDialog
+        
+        dialog = DeveloperModeDialog(self, self.current_lang)
+        dialog.authenticated.connect(self._enable_developer_mode)
+        dialog.exec_()
+    
+    def _enable_developer_mode(self):
+        """Enable developer mode."""
+        self.developer_mode.enable()
+        
+        # Update button to "Close" with red color
+        self.btnDeveloper.setText("✖ Dev")
+        self.btnDeveloper.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #ef4444, stop:1 #dc2626);
+                color: white;
+                border: 2px solid rgba(255, 255, 255, 0.3);
+                border-radius: 8px;
+                padding: 4px 8px;
+                font-weight: bold;
+                font-size: 12px;
+                text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #dc2626, stop:1 #b91c1c);
+                border: 2px solid rgba(255, 255, 255, 0.5);
+            }
+        """)
+        
+        # Update coins display if tutorials view is open
+        if hasattr(self, '_tutorials_view') and self._tutorials_view:
+            self._tutorials_view.refresh_coins()
+        
+        # Show notification
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle("Developer Mode" if self.current_lang == "en" else "Chế Độ Người Phát Triển")
+        msg.setText("Developer Mode Enabled!\n\n• Infinite coins: 9999 🪙\n• Auto-pass: All submissions pass" 
+                   if self.current_lang == "en" 
+                   else "Chế Độ Người Phát Triển Đã Bật!\n\n• Tiền vô hạn: 9999 🪙\n• Tự động pass: Tất cả bài nộp đều đúng")
+        msg.setStyleSheet("""
+            QMessageBox {
+                background: #1e293b;
+            }
+            QMessageBox QLabel {
+                color: white;
+                font-size: 14px;
+            }
+            QPushButton {
+                background: #3b82f6;
+                color: white;
+                border-radius: 6px;
+                padding: 8px 20px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background: #2563eb;
+            }
+        """)
+        msg.exec_()
+    
+    def _disable_developer_mode(self):
+        """Disable developer mode."""
+        self.developer_mode.disable()
+        
+        # Update button back to "Dev" with orange color
+        self.btnDeveloper.setText("👨‍💻 Dev")
+        self.btnDeveloper.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #f59e0b, stop:1 #d97706);
+                color: white;
+                border: 2px solid rgba(255, 255, 255, 0.3);
+                border-radius: 8px;
+                padding: 4px 8px;
+                font-weight: bold;
+                font-size: 12px;
+                text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #d97706, stop:1 #b45309);
+                border: 2px solid rgba(255, 255, 255, 0.5);
+            }
+        """)
+        
+        # Update coins display if tutorials view is open
+        if hasattr(self, '_tutorials_view') and self._tutorials_view:
+            self._tutorials_view.refresh_coins()
+        
+        # Show notification
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle("Developer Mode" if self.current_lang == "en" else "Chế Độ Người Phát Triển")
+        msg.setText("Developer Mode Disabled" if self.current_lang == "en" else "Chế Độ Người Phát Triển Đã Tắt")
+        msg.setStyleSheet("""
+            QMessageBox {
+                background: #1e293b;
+            }
+            QMessageBox QLabel {
+                color: white;
+                font-size: 14px;
+            }
+            QPushButton {
+                background: #3b82f6;
+                color: white;
+                border-radius: 6px;
+                padding: 8px 20px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background: #2563eb;
+            }
+        """)
+        msg.exec_()
+    
     def _populate_tutorials_view(self):
         """Populate Tutorials View with lessons and examples data."""
         if not hasattr(self, '_tutorials_view'):
@@ -3836,6 +4257,27 @@ class AICodingLab(QMainWindow):
         # Show empty state if no content was added
         if not content_added:
             self._tutorials_view.show_empty_state()
+    
+    def _populate_view_content(self, view):
+        """Populate a view (lessons or examples) with content - GENERIC METHOD."""
+        if not view:
+            return
+        
+        # Clear existing content
+        view.clear_content()
+        
+        # Track if any content was added
+        content_added = False
+        
+        # Populate based on view type
+        if view.view_type == "lessons":
+            content_added = self._populate_lessons_content(view)
+        else:
+            content_added = self._populate_examples_content(view)
+        
+        # Show empty state if no content was added
+        if not content_added:
+            view.show_empty_state()
     
     def _populate_tutorials_lessons(self):
         """Populate lessons in Tutorials View. Returns True if any lessons were added."""
@@ -3882,6 +4324,50 @@ class AICodingLab(QMainWindow):
         
         return content_added
     
+    def _populate_lessons_content(self, view):
+        """Populate lessons in given view. Returns True if any lessons were added."""
+        # Load lessons from lesson_structure.json
+        import json
+        lessons_file = Path("lessons/lesson_structure.json")
+        if not lessons_file.exists():
+            return False
+        
+        content_added = False
+        
+        try:
+            with open(lessons_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            lessons = data.get("lessons", [])
+            for lesson in lessons:
+                # IMPORTANT: Convert ID to string explicitly
+                lesson_id = str(lesson.get("id", ""))
+                
+                lesson_data = {
+                    "id": lesson_id,
+                    "title": lesson.get(f"title_{self.current_lang}", lesson.get("title", "")),
+                    "description": lesson.get(f"description_{self.current_lang}", lesson.get("description", "")),
+                    "icon": lesson.get("icon", "📚"),
+                    "level": lesson.get("level", "Beginner"),
+                    "steps": lesson.get("steps", []),
+                    "is_active": False
+                }
+                
+                # Check if this lesson is currently active
+                if hasattr(self, '_current_lesson_id') and self._current_lesson_id == lesson_id:
+                    lesson_data["is_active"] = True
+                
+                # add_lesson_card will filter by level internally
+                initial_count = view.content_layout.count()
+                view.add_lesson_card(lesson_data)
+                if view.content_layout.count() > initial_count:
+                    content_added = True
+                    
+        except Exception as e:
+            print(f"Error loading lessons: {e}")
+        
+        return content_added
+    
     def _populate_tutorials_examples(self):
         """Populate examples in Tutorials View. Returns True if any examples were added."""
         # Scan curriculum folder for examples
@@ -3899,6 +4385,27 @@ class AICodingLab(QMainWindow):
                 initial_count = self._tutorials_view.content_layout.count()
                 self._tutorials_view.add_example_card(example_data)
                 if self._tutorials_view.content_layout.count() > initial_count:
+                    content_added = True
+        
+        return content_added
+    
+    def _populate_examples_content(self, view):
+        """Populate examples in given view. Returns True if any examples were added."""
+        # Scan curriculum folder for examples
+        curriculum_dir = Path("curriculum")
+        if not curriculum_dir.exists():
+            return False
+        
+        content_added = False
+        
+        for py_file in sorted(curriculum_dir.glob("*.py")):
+            # Parse example metadata from file
+            example_data = self._parse_example_metadata(py_file)
+            if example_data:
+                # add_example_card will filter by level internally
+                initial_count = view.content_layout.count()
+                view.add_example_card(example_data)
+                if view.content_layout.count() > initial_count:
                     content_added = True
         
         return content_added
@@ -3934,12 +4441,23 @@ class AICodingLab(QMainWindow):
             
             level_match = re.search(r'#\s*LEVEL:\s*(Beginner|Intermediate|Advanced)', content)
             icon_match = re.search(r'#\s*ICON:\s*(.+)', content)
+            cost_match = re.search(r'#\s*COST:\s*(\d+)', content)
+            
+            example_id = file_path.stem  # Use filename as unique ID
+            
+            # Check if example is unlocked
+            is_unlocked = False
+            if hasattr(self, 'progress_manager'):
+                is_unlocked = self.progress_manager.is_example_unlocked(example_id)
             
             return {
+                "id": example_id,
                 "title": title_match.group(1).strip() if title_match else file_path.stem.replace('_', ' ').title(),
                 "description": desc_match.group(1).strip() if desc_match else "Experiment with this example.",
                 "level": level_match.group(1) if level_match else "Beginner",
                 "icon": icon_match.group(1).strip() if icon_match else "🎯",
+                "cost": int(cost_match.group(1)) if cost_match else 5,  # Default cost: 5 coins
+                "is_unlocked": is_unlocked,
                 "file_path": str(file_path)
             }
         except Exception as e:
@@ -3951,21 +4469,48 @@ class AICodingLab(QMainWindow):
     def _on_tutorial_lesson_started(self, lesson_id, step_number):
         """Handle when user clicks Start on a lesson in Tutorials View."""
         try:
-            # Hide tutorials view
-            self.hide_tutorials_view()
+            print(f"\n{'='*60}")
+            print(f"🎓 STARTING LESSON {lesson_id} - STEP {step_number}")
+            print(f"{'='*60}")
+            
+            # IMPORTANT: Remove welcome screen if it's showing
+            if hasattr(self, '_welcome_screen') and hasattr(self, 'editorStack'):
+                if self.editorStack.indexOf(self._welcome_screen) >= 0:
+                    self.editorStack.removeWidget(self._welcome_screen)
+                    self._welcome_screen.hide()
+                    print("✅ Removed welcome screen from editor")
+            
+            # Temporarily unlock functions for this lesson STEP
+            if hasattr(self, 'function_lock_manager'):
+                self.function_lock_manager.start_lesson(
+                    str(lesson_id), 
+                    step_number=step_number,
+                    lang=self.current_lang
+                )
+                self._apply_function_locks()  # Refresh sidebar to show unlocked functions
+                print(f"✅ Unlocked functions for Lesson {lesson_id} Step {step_number}")
+            
+            # Hide lessons view
+            if hasattr(self, '_lessons_view_open') and self._lessons_view_open:
+                self.hide_lessons_view()
+                print("✅ Hidden lessons view")
             
             # Convert lesson_id to string if needed
             lesson_id_str = str(lesson_id)
             
             # Start the lesson using existing method
+            print(f"📖 Loading lesson file...")
             self.load_lesson_by_id(lesson_id_str)
             
             # Make sure Functions tab is active in Learning Hub
             if hasattr(self, 'hubStackedWidget'):
                 self._switch_hub_tab(1)  # Switch to Functions
+                print("✅ Switched to Functions tab")
+            
+            print(f"{'='*60}\n")
                 
         except Exception as e:
-            print(f"Failed to start lesson: {e}")
+            print(f"❌ Failed to start lesson: {e}")
             import traceback
             traceback.print_exc()
     
@@ -3989,6 +4534,242 @@ class AICodingLab(QMainWindow):
             print(f"Failed to load example: {e}")
             import traceback
             traceback.print_exc()
+    
+    def _on_example_unlock_requested(self, example_id, cost):
+        """Handle unlock request for a locked example."""
+        s = STRINGS.get(self.current_lang, STRINGS["en"])
+        
+        # Get current coins
+        current_coins = self.progress_manager.get_total_coins()
+        
+        # Check if enough coins
+        if current_coins < cost:
+            # Not enough coins
+            QMessageBox.warning(
+                self,
+                "❌ Not Enough Coins" if self.current_lang == "en" else "❌ Không Đủ Tiền",
+                f"<h3>❌ Not Enough Coins!</h3>"
+                f"<p style='font-size: 14px;'>You need <b>{cost} 🪙</b> coins to unlock this example.</p>"
+                f"<p style='font-size: 14px;'>You have: <b>{current_coins} 🪙</b> coins</p>"
+                f"<hr>"
+                f"<p style='font-size: 13px; color: #64748b;'>Complete more lessons to earn coins!</p>"
+            )
+            print(f"❌ Not enough coins: need {cost}, have {current_coins}")
+            return
+        
+        # Show confirmation dialog
+        reply = QMessageBox.question(
+            self,
+            "🔓 Unlock Example" if self.current_lang == "en" else "🔓 Mở Khóa Ví Dụ",
+            f"<h3>🔓 Unlock This Example?</h3>"
+            f"<p style='font-size: 14px;'>Cost: <b>{cost} 🪙</b> coins</p>"
+            f"<p style='font-size: 14px;'>Your coins: <b>{current_coins} 🪙</b></p>"
+            f"<p style='font-size: 14px;'>After unlock: <b>{current_coins - cost} 🪙</b></p>"
+            f"<hr>"
+            f"<p style='font-size: 13px; color: #64748b;'>This example will be permanently unlocked.</p>",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # Attempt to unlock
+            success = self.progress_manager.unlock_example(example_id, cost)
+            
+            if success:
+                # Success!
+                QMessageBox.information(
+                    self,
+                    "✅ Unlocked!" if self.current_lang == "en" else "✅ Đã Mở Khóa!",
+                    f"<h3>✅ Example Unlocked!</h3>"
+                    f"<p style='font-size: 14px;'>You spent <b>{cost} 🪙</b> coins.</p>"
+                    f"<p style='font-size: 14px;'>Remaining: <b>{self.progress_manager.get_total_coins()} 🪙</b></p>"
+                    f"<hr>"
+                    f"<p style='font-size: 13px; color: #10b981;'>You can now load this example anytime!</p>"
+                )
+                print(f"✅ Example unlocked: {example_id}, spent {cost} coins")
+                
+                # Refresh examples view to show unlocked state
+                if hasattr(self, '_examples_view'):
+                    self._populate_view_content(self._examples_view)
+                    self._examples_view.refresh_coins()
+            else:
+                # Failed (shouldn't happen if we checked coins above)
+                QMessageBox.warning(
+                    self,
+                    "❌ Failed" if self.current_lang == "en" else "❌ Thất Bại",
+                    "Failed to unlock example. Please try again."
+                )
+                print(f"❌ Failed to unlock example: {example_id}")
+    
+    # --- Welcome Screen & Mode Selection ---
+    def _show_welcome_screen_on_startup(self):
+        """Show Welcome Screen in code editor area on first launch."""
+        if not hasattr(self, 'editorStack') or not hasattr(self, '_welcome_screen'):
+            return
+        
+        # Add welcome screen to editor stack
+        self.editorStack.addWidget(self._welcome_screen)
+        self.editorStack.setCurrentWidget(self._welcome_screen)
+        
+        print("Welcome Screen displayed on startup")
+    
+    def _on_creative_mode_selected(self):
+        """Handle Creative Mode selection from Welcome Screen."""
+        print("✅ Creative Mode selected")
+        
+        # Hide welcome screen
+        if hasattr(self, '_welcome_screen'):
+            self._welcome_screen.hide()
+        
+        # Create new blank file for creative work
+        self.new_file()
+        
+        # Apply function locks to sidebar
+        self._apply_function_locks()
+        
+        # Show status message
+        self.statusBar().showMessage(
+            "Creative Mode: Work freely with unlocked functions" if self.current_lang == "en" 
+            else "Chế độ Sáng tạo: Làm việc tự do với các chức năng đã mở khóa",
+            5000
+        )
+    
+    def _on_unlock_mode_selected(self):
+        """Handle Unlock Mode selection from Welcome Screen."""
+        print("✅ Unlock Mode selected")
+        
+        # Remove welcome screen from editor stack completely
+        if hasattr(self, '_welcome_screen') and hasattr(self, 'editorStack'):
+            if self.editorStack.indexOf(self._welcome_screen) >= 0:
+                self.editorStack.removeWidget(self._welcome_screen)
+            self._welcome_screen.hide()
+            print("✅ Removed welcome screen from editor stack")
+        
+        # Show Lessons View (NOT Tutorials - that's for Examples only)
+        self.show_lessons_view()
+        
+        # Show status message
+        self.statusBar().showMessage(
+            "Unlock Mode: Complete lessons to unlock new functions" if self.current_lang == "en"
+            else "Chế độ Mở khóa: Hoàn thành bài học để mở khóa chức năng mới",
+            5000
+        )
+    
+    def _apply_function_locks(self):
+        """Apply lock effects to function sidebar based on unlock status."""
+        # Get ALL unlocked functions (permanent + temporary)
+        unlocked_functions = self.function_lock_manager.get_all_unlocked_functions()
+        
+        print(f"\n{'─'*60}")
+        print(f"🔒 APPLYING FUNCTION LOCKS")
+        print(f"{'─'*60}")
+        print(f"   Permanent unlocks: {len(self.function_lock_manager.unlocked_functions)}")
+        print(f"   Temporary unlocks: {len(self.function_lock_manager.temporary_unlocked_functions)}")
+        print(f"   Total unlocked: {len(unlocked_functions)}")
+        if unlocked_functions:
+            print(f"   Functions: {', '.join(sorted(unlocked_functions))}")
+        print(f"{'─'*60}\n")
+        
+        # Refresh function library with current lock status
+        try:
+            from src.modules.function_library import populate_functions_tab
+            populate_functions_tab(
+                self.running_mode_widget,
+                is_small=self.is_small_screen,
+                lang=self.current_lang,
+                unlocked_functions=unlocked_functions
+            )
+            print("✅ Function library refreshed with lock status")
+        except Exception as e:
+            print(f"❌ Error refreshing function library: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _toggle_mode(self):
+        """Toggle between Creative Mode and Unlock Mode."""
+        if self.current_mode == "creative":
+            # Switch to Unlock Mode
+            self.current_mode = "unlock"
+            self._update_mode_toggle_button()
+            self.show_lessons_view()  # Changed: show Lessons view, not Tutorials
+            
+            # Show status message
+            self.statusBar().showMessage(
+                "Unlock Mode: Complete lessons to unlock new functions" if self.current_lang == "en"
+                else "Chế độ Mở khóa: Hoàn thành bài học để mở khóa chức năng mới",
+                5000
+            )
+        else:
+            # Switch to Creative Mode
+            self.current_mode = "creative"
+            self._update_mode_toggle_button()
+            
+            # Close lessons view if open
+            if hasattr(self, '_lessons_view_open') and self._lessons_view_open:
+                self.hide_lessons_view()
+            
+            # Create new blank file if no files are open
+            if not hasattr(self, 'open_tabs') or len(self.open_tabs) == 0:
+                self.new_file()
+            else:
+                # Just ensure we're showing an editor tab
+                if hasattr(self, 'editorStack'):
+                    current_widget = self.editorStack.currentWidget()
+                    # If current widget is welcome screen or any view, switch to first editor
+                    if current_widget in [self._welcome_screen, self._lessons_view, self._examples_view]:
+                        for i in range(self.editorStack.count()):
+                            widget = self.editorStack.widget(i)
+                            if widget not in [self._welcome_screen, self._lessons_view, self._examples_view]:
+                                self.editorStack.setCurrentWidget(widget)
+                                break
+            
+            # Apply function locks
+            self._apply_function_locks()
+            
+            # Show status message
+            self.statusBar().showMessage(
+                "Creative Mode: Work freely with unlocked functions" if self.current_lang == "en"
+                else "Chế độ Sáng tạo: Làm việc tự do với các chức năng đã mở khóa",
+                5000
+            )
+    
+    def _update_mode_toggle_button(self):
+        """Update the mode toggle button text and style."""
+        s = STRINGS[self.current_lang]
+        _mode_fs = 10 if self.is_small_screen else 14
+        
+        if self.current_mode == "creative":
+            # Currently in Creative Mode, show button to switch to Unlock Mode
+            text = "🔓 Unlock Mode" if self.current_lang == "en" else "🔓 Mở khóa"
+            tooltip = "Switch to Unlock Mode to complete lessons" if self.current_lang == "en" else "Chuyển sang Chế độ Mở khóa để hoàn thành bài học"
+            color_start = "#10B981"
+            color_end = "#059669"
+        else:
+            # Currently in Unlock Mode, show button to switch to Creative Mode
+            text = "🎨 Creative Mode" if self.current_lang == "en" else "🎨 Sáng tạo"
+            tooltip = "Switch to Creative Mode to work freely" if self.current_lang == "en" else "Chuyển sang Chế độ Sáng tạo để làm việc tự do"
+            color_start = "#8B5CF6"
+            color_end = "#6D28D9"
+        
+        self.btnModeToggle.setText(text)
+        self.btnModeToggle.setToolTip(tooltip)
+        self.btnModeToggle.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {color_start}, stop:1 {color_end});
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: {_mode_fs}px;
+                padding: 0 16px;
+            }}
+            QPushButton:hover {{
+                background: {color_end};
+            }}
+            QPushButton:pressed {{
+                background: {color_start};
+            }}
+        """)
 
     # --- Workspace Logic ---
     def _rebuild_workspace_cards(self):
@@ -4992,9 +5773,15 @@ class AICodingLab(QMainWindow):
                 self.runningEditorSplitter.setSizes([1000, req_h, prog_h, 0])
             self.set_console_expanded(False)
             
+            # IMPORTANT: Set flag to prevent triggering lesson close logic
+            self._loading_new_lesson = True
+            
             # Close any existing tabs before loading first step
             self._close_current_tab()
             QApplication.processEvents()
+            
+            # Clear flag
+            self._loading_new_lesson = False
             
             # Load first step
             self.load_step(1)
@@ -5002,6 +5789,18 @@ class AICodingLab(QMainWindow):
             # Log
             title = lesson.get(f'title_{self.current_lang}', lesson.get('title', f'Lesson {lesson_id}'))
             self.log_to_console(f"Started {title} - Step 1/{total_steps}")
+            
+            # Check and log challenge status
+            if hasattr(self, 'progress_manager'):
+                challenge_unlocked = self.progress_manager.is_challenge_unlocked(lesson_id)
+                if challenge_unlocked:
+                    self.log_to_console(f"🔓 Challenge is unlocked and ready!")
+                else:
+                    completed_steps = sum(
+                        1 for step_data in self.progress_manager.get_lesson_data(lesson_id)["steps"].values()
+                        if step_data.get("completed", False)
+                    )
+                    self.log_to_console(f"🔒 Challenge locked. Complete all {total_steps} steps to unlock. ({completed_steps}/{total_steps} completed)")
             
         except Exception as e:
             self.log_to_console(f"Error loading lesson: {e}")
@@ -5073,6 +5872,10 @@ class AICodingLab(QMainWindow):
         self.lesson_solution_used = False
         self.step_error_count = 0
         
+        # Refresh coins in examples view if it's open
+        if hasattr(self, '_examples_view') and hasattr(self._examples_view, 'refresh_coins'):
+            self._examples_view.refresh_coins()
+        
         self.log_to_console(s.get("LESSON_STOPPED", "Exited lesson mode. Back to free coding."))
 
     def load_step(self, step_num):
@@ -5102,21 +5905,27 @@ class AICodingLab(QMainWindow):
         # Load file
         file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), step_file)
         
+        print(f"📂 Loading step file: {file_path}")
+        
         try:
-            # Use lesson_parser to detect blank-mode steps
+            # Parse step file to detect fill-in-blank mode
             from src.modules.lesson_parser import parse_step_file
             parsed_step = parse_step_file(file_path)
             
             if not parsed_step.is_challenge:
-                # Fill-in-the-blank mode
+                # Fill-in-the-blank mode - use GameLessonWidget
+                print(f"🎮 Using GameLessonWidget (fill-in-blank mode)")
                 self._current_parsed_step = parsed_step
                 if hasattr(self, 'editorStack') and hasattr(self, 'gameLessonWidget'):
                     self.editorStack.setCurrentWidget(self.gameLessonWidget)
                     self.gameLessonWidget.set_blank_mode(parsed_step)
                 else:
+                    # Fallback to monacoPlaceholder if gameLessonWidget not available
+                    self.editorStack.setCurrentWidget(self.monacoPlaceholder)
                     self.monacoPlaceholder.set_blank_mode(parsed_step)
             else:
-                # Challenge / free-form mode
+                # Challenge / free-form mode - use plain editor
+                print(f"📝 Using plain editor (challenge mode)")
                 self._current_parsed_step = None
                 if hasattr(self, 'editorStack'):
                     self.editorStack.setCurrentWidget(self.monacoPlaceholder)
@@ -5125,6 +5934,8 @@ class AICodingLab(QMainWindow):
             filename = os.path.basename(step_file)
             self.current_open_file = filename
             self.current_step = step_num
+            
+            print(f"✅ Loaded step {step_num}: {filename}")
             
             # Update progress bar
             if hasattr(self, '_step_progress_bar'):
@@ -5147,6 +5958,7 @@ class AICodingLab(QMainWindow):
                 self.load_requirements_panel(self.current_lesson_id, step_num)
             
             # Load tutorial into floating instruction card (for Required Functions only)
+            # Load tutorial into floating instruction card (for Required Functions only)
             lang_folder = "vi" if self.current_lang == "vi" else "en"
             tutorial_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tutorials", lang_folder, f"lesson{self.current_lesson_id}_step{step_num}.md")
             if hasattr(self, '_instruction_card'):
@@ -5167,9 +5979,13 @@ class AICodingLab(QMainWindow):
             # Create new tab for this step
             self.add_tab(filename, is_code=True)
             
-        except FileNotFoundError:
+        except FileNotFoundError as e:
+            print(f"❌ File not found: {e}")
             self.log_to_console(f"Step file not found: {step_file}")
         except Exception as e:
+            print(f"❌ Error loading step: {e}")
+            import traceback
+            traceback.print_exc()
             self.log_to_console(f"Error loading step: {e}")
     
     def previous_step(self):
@@ -5186,6 +6002,15 @@ class AICodingLab(QMainWindow):
             QApplication.processEvents()
             # Then load previous step
             self.load_step(self.current_step - 1)
+            
+            # Update unlocked functions for the new step
+            if hasattr(self, 'function_lock_manager') and hasattr(self, 'current_lesson_id'):
+                self.function_lock_manager.update_step(
+                    self.current_step,
+                    lang=self.current_lang
+                )
+                self._apply_function_locks()  # Refresh sidebar
+                print(f"🔄 Updated unlocks for Step {self.current_step}")
         else:
             self.log_to_console("Already at first step!")
     
@@ -5242,6 +6067,13 @@ class AICodingLab(QMainWindow):
                     
                 results = validate_blanks(blank_contents, self._current_parsed_step.blank_map)
                 
+                # Developer Mode: Auto-pass
+                if self.developer_mode.should_auto_pass():
+                    print("🔓 Developer Mode: Auto-passing step")
+                    # Mark all blanks as correct
+                    for result in results:
+                        result.is_correct = True
+                
                 if hasattr(self, 'editorStack') and self.editorStack.currentWidget() == self.gameLessonWidget:
                     self.gameLessonWidget.set_blank_feedback(results)
                 else:
@@ -5254,19 +6086,41 @@ class AICodingLab(QMainWindow):
                 
                 if is_correct:
                     hearts_earned = 0
+                    stars_earned = 0
+                    
                     if hasattr(self, '_step_progress_bar'):
+                        # Calculate stars based on hint/solution usage
                         if self.lesson_solution_used:
-                            self.log_to_console(f"✅ Step {self.current_step}: {s.get('CORRECT_NO_HEARTS', 'Correct! (No hearts - solution was used)')}")
+                            stars_earned = 0
+                            self.log_to_console(f"✅ Step {self.current_step}: Correct! (No stars - solution was used)")
                             hearts_earned = 0
                         elif self.lesson_hint_used:
-                            self._step_progress_bar.hearts += 0.5
+                            stars_earned = 1
+                            self._step_progress_bar.add_stars(1)
+                            self._step_progress_bar.hearts += 0.5  # Backward compatibility
                             self._step_progress_bar.update_display()
-                            self.log_to_console(f"✅ Step {self.current_step}: {s.get('CORRECT_HALF_HEART', 'Correct! +0.5 ❤️ (hint was used)')}")
+                            self.log_to_console(f"✅ Step {self.current_step}: Correct! +1 ⭐ (hint was used)")
                             hearts_earned = 0.5
                         else:
-                            self._step_progress_bar.add_heart()
-                            self.log_to_console(f"✅ Step {self.current_step}: {s.get('CORRECT_FULL_HEART', 'Correct! +1 ❤️')}")
+                            stars_earned = 2
+                            self._step_progress_bar.add_stars(2)
+                            self._step_progress_bar.add_heart()  # Backward compatibility
+                            self.log_to_console(f"✅ Step {self.current_step}: Perfect! +2 ⭐")
                             hearts_earned = 1.0
+                        
+                        # Save progress to ProgressManager
+                        if hasattr(self, 'progress_manager') and hasattr(self, 'current_lesson_id'):
+                            self.progress_manager.complete_step(
+                                lesson_id=self.current_lesson_id,
+                                step_num=self.current_step,
+                                hint_used=self.lesson_hint_used,
+                                solution_used=self.lesson_solution_used
+                            )
+                            print(f"💾 Progress saved: Lesson {self.current_lesson_id}, Step {self.current_step}, Stars: {stars_earned}")
+                            
+                            # Update challenge indicator (may unlock after this step)
+                            if hasattr(self, '_step_progress_bar'):
+                                self._step_progress_bar.update_display()
                         
                         self._step_progress_bar.btn_submit.setVisible(False)
                         
@@ -5353,6 +6207,11 @@ class AICodingLab(QMainWindow):
                 # Compare codes
                 is_correct = self._compare_code_with_solution(student_code, solution_code)
                 
+                # Developer Mode: Auto-pass
+                if self.developer_mode.should_auto_pass():
+                    print("🔓 Developer Mode: Auto-passing step (free-form)")
+                    is_correct = True
+                
                 # Mark step status
                 if hasattr(self, '_step_progress_bar'):
                     self._step_progress_bar.mark_step_status(self.current_step, is_correct)
@@ -5360,22 +6219,41 @@ class AICodingLab(QMainWindow):
                 # Add heart if correct
                 if is_correct:
                     hearts_earned = 0
+                    stars_earned = 0
+                    
                     if hasattr(self, '_step_progress_bar'):
-                        # Check if solution was used - no hearts
+                        # Calculate stars based on hint/solution usage
                         if self.lesson_solution_used:
-                            self.log_to_console(f"✅ Step {self.current_step}: {s.get('CORRECT_NO_HEARTS', 'Correct! (No hearts - solution was used)')}")
+                            stars_earned = 0
+                            self.log_to_console(f"✅ Step {self.current_step}: Correct! (No stars - solution was used)")
                             hearts_earned = 0
-                        # Check if hint was used - only 0.5 hearts
                         elif self.lesson_hint_used:
-                            self._step_progress_bar.hearts += 0.5
+                            stars_earned = 1
+                            self._step_progress_bar.add_stars(1)
+                            self._step_progress_bar.hearts += 0.5  # Backward compatibility
                             self._step_progress_bar.update_display()
-                            self.log_to_console(f"✅ Step {self.current_step}: {s.get('CORRECT_HALF_HEART', 'Correct! +0.5 ❤️ (hint was used)')}")
+                            self.log_to_console(f"✅ Step {self.current_step}: Correct! +1 ⭐ (hint was used)")
                             hearts_earned = 0.5
-                        # No hint or solution - full 1 heart
                         else:
-                            self._step_progress_bar.add_heart()
-                            self.log_to_console(f"✅ Step {self.current_step}: {s.get('CORRECT_FULL_HEART', 'Correct! +1 ❤️')}")
+                            stars_earned = 2
+                            self._step_progress_bar.add_stars(2)
+                            self._step_progress_bar.add_heart()  # Backward compatibility
+                            self.log_to_console(f"✅ Step {self.current_step}: Perfect! +2 ⭐")
                             hearts_earned = 1.0
+                        
+                        # Save progress to ProgressManager
+                        if hasattr(self, 'progress_manager') and hasattr(self, 'current_lesson_id'):
+                            self.progress_manager.complete_step(
+                                lesson_id=self.current_lesson_id,
+                                step_num=self.current_step,
+                                hint_used=self.lesson_hint_used,
+                                solution_used=self.lesson_solution_used
+                            )
+                            print(f"💾 Progress saved: Lesson {self.current_lesson_id}, Step {self.current_step}, Stars: {stars_earned}")
+                            
+                            # Update challenge indicator (may unlock after this step)
+                            if hasattr(self, '_step_progress_bar'):
+                                self._step_progress_bar.update_display()
                         
                         # Hide submit button after correct answer
                         self._step_progress_bar.btn_submit.setVisible(False)
@@ -5474,7 +6352,36 @@ class AICodingLab(QMainWindow):
             QApplication.processEvents()
             # Then move to next step
             self.load_step(self.current_step + 1)
+            
+            # Update unlocked functions for the new step
+            if hasattr(self, 'function_lock_manager') and hasattr(self, 'current_lesson_id'):
+                self.function_lock_manager.update_step(
+                    self.current_step,
+                    lang=self.current_lang
+                )
+                self._apply_function_locks()  # Refresh sidebar
+                print(f"🔄 Updated unlocks for Step {self.current_step}")
         elif self.current_step == total_steps:
+            # Check if challenge is unlocked
+            challenge_unlocked = False
+            if hasattr(self, 'progress_manager') and hasattr(self, 'current_lesson_id'):
+                challenge_unlocked = self.progress_manager.is_challenge_unlocked(self.current_lesson_id)
+            
+            if not challenge_unlocked:
+                # Challenge not unlocked yet - show message
+                s = STRINGS.get(self.current_lang, STRINGS["en"])
+                QMessageBox.warning(
+                    self,
+                    "🔒 Challenge Locked",
+                    "<h3>🔒 Challenge Locked</h3>"
+                    "<p style='font-size: 14px;'>You must complete all steps before accessing the challenge!</p>"
+                    "<hr>"
+                    "<p style='font-size: 13px; color: #64748b;'>Complete each step with the Submit button to unlock the challenge.</p>"
+                )
+                self.log_to_console("🔒 Challenge locked. Complete all steps first!")
+                return
+            
+            # Challenge unlocked - proceed
             # Reset error count when moving to challenge
             self.step_error_count = 0
             # Close all tabs first
@@ -5488,6 +6395,12 @@ class AICodingLab(QMainWindow):
     
     def _close_current_tab(self):
         """Close ALL tabs in the editor."""
+        # Check if we're closing a lesson without completion
+        # BUT skip if we're loading a new lesson (flag set by load_lesson_by_id)
+        if (hasattr(self, 'current_lesson_id') and self.current_lesson_id and 
+            not getattr(self, '_loading_new_lesson', False)):
+            self._on_lesson_closed_without_completion()
+        
         # Close all tabs using the existing close_tab method
         tabs_to_close = self.open_tabs.copy()  # Copy to avoid modification during iteration
         for filename in tabs_to_close:
@@ -5537,9 +6450,17 @@ class AICodingLab(QMainWindow):
             is_correct = True
         
         if is_correct:
-            # Challenge completed successfully!
+            # ═══════════════════════════════════════════════════════════
+            # CHALLENGE COMPLETED SUCCESSFULLY!
+            # ═══════════════════════════════════════════════════════════
             current_hearts = self._step_progress_bar.hearts if hasattr(self, '_step_progress_bar') else 0
             max_hearts = self._step_progress_bar.max_hearts if hasattr(self, '_step_progress_bar') else 5
+            
+            # Permanently unlock functions via ProgressManager
+            unlocked_functions = set()
+            if hasattr(self, 'progress_manager') and hasattr(self, 'current_lesson_id'):
+                unlocked_functions = self.progress_manager.complete_challenge(self.current_lesson_id)
+                print(f"🔓 Permanently unlocked {len(unlocked_functions)} functions: {unlocked_functions}")
             
             # Mark lesson as completed
             self._mark_lesson_completed(self.current_lesson_id)
@@ -5556,13 +6477,28 @@ class AICodingLab(QMainWindow):
             # Clear editor
             self.monacoPlaceholder.clear()
             
-            # Show completion message with hearts
+            # Show completion message with unlocked functions
+            unlocked_list = "\n".join([f"  • {func}" for func in sorted(unlocked_functions)])
             QMessageBox.information(self, 
                 "🎉 " + s.get("LESSON_COMPLETE", "Lesson Complete!"),
-                s.get("LESSON_COMPLETE_MSG", "Congratulations! You have completed this lesson!") +
-                f"\n\n🏆 Final Score: {current_hearts}/{max_hearts} ❤️")
+                f"<h2>🎉 Congratulations!</h2>"
+                f"<p style='font-size: 14px;'>You completed the challenge!</p>"
+                f"<p style='font-size: 16px; font-weight: bold;'>🏆 Final HP: {current_hearts}/{max_hearts} ❤️</p>"
+                f"<hr>"
+                f"<p style='font-size: 14px; font-weight: bold;'>🔓 Permanently Unlocked Functions:</p>"
+                f"<p style='font-size: 12px; font-family: monospace;'>{unlocked_list if unlocked_list else 'None'}</p>"
+                f"<p style='font-size: 13px; color: #10b981;'>These functions are now available in Creative Mode!</p>")
             
-            self.log_to_console(f"✅ Challenge completed! Final score: {current_hearts}/{max_hearts} ❤️")
+            self.log_to_console(f"✅ Challenge completed! Final HP: {current_hearts}/{max_hearts} ❤️")
+            self.log_to_console(f"🔓 Unlocked functions: {', '.join(sorted(unlocked_functions))}")
+            
+            # Refresh function library to show permanent unlocks
+            if hasattr(self, 'function_lock_manager'):
+                self._apply_function_locks()
+            
+            # Refresh coins in examples view (no coins added here, but good to refresh)
+            if hasattr(self, '_examples_view') and hasattr(self._examples_view, 'refresh_coins'):
+                self._examples_view.refresh_coins()
             
             # Reset lesson state
             if hasattr(self, 'current_lesson_data'):
@@ -5585,65 +6521,52 @@ class AICodingLab(QMainWindow):
             self._enable_hint_solution_buttons()
             
         else:
-            # Challenge failed - deduct 1 heart
+            # ═══════════════════════════════════════════════════════════
+            # CHALLENGE FAILED - DECREASE HP
+            # ═══════════════════════════════════════════════════════════
             if hasattr(self, '_step_progress_bar'):
+                # Decrease HP using new system
+                remaining_hp = self._step_progress_bar.decrease_hp()
+                
+                # Also update ProgressManager
+                if hasattr(self, 'progress_manager') and hasattr(self, 'current_lesson_id'):
+                    self.progress_manager.decrease_challenge_hp(self.current_lesson_id)
+                
+                # Backward compatibility
                 if self._step_progress_bar.hearts >= 1:
                     self._step_progress_bar.hearts -= 1
                     self._step_progress_bar.update_display()
+                
+                if remaining_hp > 0:
+                    # Still have HP - can try again
+                    QMessageBox.warning(self,
+                        "❌ " + s.get("CHALLENGE_FAILED", "Challenge Failed"),
+                        f"<h3>❌ Incorrect Solution!</h3>"
+                        f"<p style='font-size: 14px;'>Your code doesn't match the expected solution.</p>"
+                        f"<p style='font-size: 18px; font-weight: bold; color: #dc2626;'>-1 ❤️</p>"
+                        f"<p style='font-size: 16px;'>Remaining HP: {remaining_hp}/5</p>"
+                        f"<hr>"
+                        f"<p style='font-size: 13px;'>Review your code and try again!</p>")
                     
-                    remaining_hearts = self._step_progress_bar.hearts
-                    
-                    if remaining_hearts > 0:
-                        # Still have hearts - can try again
-                        QMessageBox.warning(self,
-                            "❌ " + s.get("CHALLENGE_FAILED", "Challenge Failed"),
-                            s.get("CHALLENGE_FAILED_MSG", "Your solution is incorrect!") +
-                            f"\n\n-1 ❤️\n\nRemaining Hearts: {remaining_hearts}/{self._step_progress_bar.max_hearts}" +
-                            "\n\n" + s.get("TRY_AGAIN", "Try again!"))
-                        
-                        self.log_to_console(f"❌ Challenge failed! -1 ❤️ (Remaining: {remaining_hearts})")
-                    else:
-                        # No hearts left - game over
-                        QMessageBox.critical(self,
-                            "💔 " + s.get("GAME_OVER", "Game Over"),
-                            s.get("GAME_OVER_MSG", "You have no hearts left!") +
-                            "\n\n" + s.get("LESSON_RESTART", "Please restart the lesson."))
-                        
-                        self.log_to_console("💔 Game Over! No hearts left.")
-                        
-                        # Close all tabs and reset
-                        tabs_to_close = self.open_tabs.copy()
-                        for filename in tabs_to_close:
-                            self.close_tab(filename)
-                        
-                        if hasattr(self, '_step_progress_bar'):
-                            self._step_progress_bar.hide_bar()
-                        
-                        self.monacoPlaceholder.clear()
-                        
-                        if hasattr(self, 'current_lesson_data'):
-                            delattr(self, 'current_lesson_data')
-                        self.current_step = 1
-                        
-                        # Reset card button and hide lesson UI
-                        if hasattr(self, '_active_lesson_id') and self._active_lesson_id is not None:
-                            if hasattr(self, '_lesson_cards') and self._active_lesson_id in self._lesson_cards:
-                                self._lesson_cards[self._active_lesson_id].set_active(False)
-                            self._active_lesson_id = None
-                        if hasattr(self, 'btnHint') and self.btnHint:
-                            self.btnHint.setVisible(False)
-                        if hasattr(self, 'btnSolution') and self.btnSolution:
-                            self.btnSolution.setVisible(False)
-                        
-                        # Re-enable Hint and Solution buttons
-                        self._enable_hint_solution_buttons()
+                    self.log_to_console(f"❌ Challenge failed! -1 ❤️ (Remaining HP: {remaining_hp}/5)")
                 else:
-                    # Already at 0 hearts
+                    # No HP left - game over
                     QMessageBox.critical(self,
                         "💔 " + s.get("GAME_OVER", "Game Over"),
-                        s.get("GAME_OVER_MSG", "You have no hearts left!"))
+                        f"<h2>💔 Game Over!</h2>"
+                        f"<p style='font-size: 14px;'>You have no HP left!</p>"
+                        f"<p style='font-size: 16px; font-weight: bold; color: #dc2626;'>HP: 0/5 ❤️</p>"
+                        f"<hr>"
+                        f"<p style='font-size: 13px;'>You can restart the lesson to try again.</p>"
+                        f"<p style='font-size: 12px; color: #64748b;'>Your completed steps are saved!</p>")
                     
-                    # Reset
+                    self.log_to_console("💔 Game Over! No HP left.")
+                    
+                    # Reset challenge HP in ProgressManager for retry
+                    if hasattr(self, 'progress_manager') and hasattr(self, 'current_lesson_id'):
+                        self.progress_manager.reset_challenge(self.current_lesson_id)
+                    
+                    # Close all tabs and reset
                     tabs_to_close = self.open_tabs.copy()
                     for filename in tabs_to_close:
                         self.close_tab(filename)
@@ -5771,8 +6694,23 @@ class AICodingLab(QMainWindow):
             """)
     
     def _mark_lesson_completed(self, lesson_id):
-        """Mark a lesson as completed - update UI with green checkmark."""
+        """Mark a lesson as completed - update UI with green checkmark and unlock functions."""
         self.log_to_console(f"✅ Lesson {lesson_id} marked as completed!")
+        
+        # UNLOCK FUNCTIONS for this lesson
+        if hasattr(self, 'function_lock_manager'):
+            # Get functions that will be unlocked
+            functions_to_unlock = self.function_lock_manager.get_functions_for_lesson(lesson_id)
+            
+            # End lesson with completion = True (makes temporary unlocks permanent)
+            self.function_lock_manager.end_lesson(lesson_id, completed=True)
+            
+            # Refresh function library to show newly unlocked functions
+            self._apply_function_locks()
+            
+            # Show unlock notification
+            if functions_to_unlock:
+                self._show_unlock_notification(lesson_id, functions_to_unlock)
         
         # Update lesson card if it exists
         if hasattr(self, '_lesson_cards') and lesson_id in self._lesson_cards:
@@ -5800,6 +6738,49 @@ class AICodingLab(QMainWindow):
             """)
             
             self.log_to_console(f"✅ Lesson {lesson_id} card updated with green checkmark!")
+    
+    def _on_lesson_closed_without_completion(self):
+        """Handle when lesson is closed without completion - remove temporary unlocks."""
+        if hasattr(self, 'current_lesson_id') and hasattr(self, 'function_lock_manager'):
+            lesson_id = self.current_lesson_id
+            # Check if lesson was actually completed
+            if lesson_id not in self.function_lock_manager.get_completed_lessons():
+                # Lesson not completed - remove temporary unlocks
+                self.function_lock_manager.end_lesson(lesson_id, completed=False)
+                self._apply_function_locks()  # Refresh sidebar
+                print(f"🔒 Removed temporary unlocks for Lesson {lesson_id} (not completed)")
+    
+    def _show_unlock_notification(self, lesson_id, unlocked_functions):
+        """Show notification popup about newly unlocked functions."""
+        s = STRINGS[self.current_lang]
+        
+        # Create message
+        if self.current_lang == "vi":
+            title = "🎉 Chúc mừng! Đã mở khóa chức năng mới!"
+            message = f"Bạn đã hoàn thành Lesson {lesson_id} và mở khóa các chức năng sau:\n\n"
+        else:
+            title = "🎉 Congratulations! New Functions Unlocked!"
+            message = f"You've completed Lesson {lesson_id} and unlocked the following functions:\n\n"
+        
+        # Add function list
+        for func in unlocked_functions:
+            message += f"✅ {func}\n"
+        
+        # Add instruction
+        if self.current_lang == "vi":
+            message += "\n💡 Bạn có thể sử dụng các chức năng này trong Creative Mode!"
+        else:
+            message += "\n💡 You can now use these functions in Creative Mode!"
+        
+        # Show popup
+        QMessageBox.information(self, title, message)
+        
+        # Also show in status bar
+        status_msg = f"🎉 Unlocked {len(unlocked_functions)} new functions!" if self.current_lang == "en" else f"🎉 Đã mở khóa {len(unlocked_functions)} chức năng mới!"
+        self.statusBar().showMessage(status_msg, 8000)
+        
+        # Log to console
+        self.log_to_console(f"🎉 Unlocked functions: {', '.join(unlocked_functions)}")
     
     def load_challenge(self):
         """Load the challenge for the current lesson."""
@@ -5835,7 +6816,36 @@ class AICodingLab(QMainWindow):
             steps = lesson.get('steps', [])
             self.current_step = len(steps) + 1
             
+            # ═══════════════════════════════════════════════════════════
+            # STARS TO COINS CONVERSION DIALOG
+            # ═══════════════════════════════════════════════════════════
+            if hasattr(self, 'progress_manager') and hasattr(self, 'current_lesson_id'):
+                # Get total stars earned
+                total_stars = self.progress_manager.get_total_stars_for_lesson(self.current_lesson_id)
+                
+                # Convert stars to coins
+                stars_earned, coins_added = self.progress_manager.start_challenge(self.current_lesson_id)
+                
+                # Show conversion dialog
+                s = STRINGS[self.current_lang]
+                QMessageBox.information(
+                    self,
+                    "🎯 Challenge Time!",
+                    f"<h2>🎯 Challenge Time!</h2>"
+                    f"<p style='font-size: 14px;'>You completed all steps!</p>"
+                    f"<p style='font-size: 16px; font-weight: bold;'>⭐ Stars earned: {stars_earned}</p>"
+                    f"<p style='font-size: 16px; font-weight: bold;'>🪙 Coins added: +{coins_added}</p>"
+                    f"<hr>"
+                    f"<p style='font-size: 14px;'>Challenge HP: ❤️ 5/5</p>"
+                    f"<p style='font-size: 13px; color: #64748b;'>Wrong answers will decrease HP.<br>"
+                    f"Complete the challenge to permanently unlock functions!</p>"
+                )
+                
+                print(f"🎯 Challenge started: {stars_earned} ⭐ → {coins_added} 🪙")
+            
             if hasattr(self, '_step_progress_bar'):
+                # Switch to HP mode
+                self._step_progress_bar.switch_to_challenge_mode(hp=5)
                 self._step_progress_bar.set_step(self.current_step)
                 # Disable prev button in challenge
                 self._step_progress_bar.btn_prev.setEnabled(False)
